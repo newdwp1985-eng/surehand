@@ -39,6 +39,22 @@ STATE = ROOT / ".state.json"
 MAX_IDENTITIES = 600
 
 
+def skill_version():
+    """版本号只有一个源头：SKILL.md 的 frontmatter。
+
+    在 cli 里另写一个常量，迟早和引擎、MCP server 各说各话——
+    调用方问「你跑的是哪个版本」，得到三个答案比没有答案更糟。
+    """
+    try:
+        text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+    except OSError:
+        return "unknown"
+    for line in text.splitlines()[:20]:
+        if line.startswith("version:"):
+            return line.split(":", 1)[1].strip().strip('"\'')
+    return "unknown"
+
+
 # ---------------------------------------------------------------- 状态
 
 def load_state():
@@ -169,8 +185,26 @@ def print_look_web(nodes, snap, summary):
 
 # ---------------------------------------------------------------- ref 解析
 
-class RefFormatError(Exception):
+class BadInput(Exception):
+    """调用方给的参数或文件本身有问题。
+
+    带错误码是硬要求：这些分支以前直接 `raise SystemExit("中文提示")`，
+    走 --json 时输出既不是 JSON、也没有 code，机器调用方拿到的是一行
+    中文散文——解析失败后只能猜。人眼看的提示和机器看的码，缺一不可。
+    """
+
+    code = "ARG_MISSING"
+
+    def __init__(self, msg="", code=None):
+        super().__init__(msg)
+        if code:
+            self.code = code
+
+
+class RefFormatError(BadInput):
     """ref 写法本身不合法。与「目标消失」是两件事，不能共用 REF_STALE。"""
+
+    code = "REF_MALFORMED"
 
 
 _REF_DESK = re.compile(r"^(?:e)?(\d+)$", re.I)
@@ -208,7 +242,8 @@ def parse_ref(ref):
 def require_desk_ref(ref):
     surface, tok = parse_ref(ref)
     if surface != "desk":
-        raise SystemExit("这是网页 ref（%s），请配 --web 使用" % ref)
+        raise BadInput("这是网页 ref（%s），--web 只认 w:N 这种网页 ref；桌面动作别加 --web" % ref,
+                        "REF_MALFORMED")
     return tok
 
 
@@ -276,7 +311,8 @@ def cmd_doctor(a):
     d = desk.health()
     w = web.health()
     multi = _instance_count()
-    rep = {"ok": True, "desk": d, "web": w, "daemon_instances": multi,
+    rep = {"ok": True, "version": skill_version(),
+           "desk": d, "web": w, "daemon_instances": multi,
            "state_file": str(STATE), "state_exists": STATE.is_file(),
            "binaries": {"engine": str(desk.BIN if desk.PLATFORM == "macos" else desk.WCCD),
                         "engine_exists": (desk.BIN if desk.PLATFORM == "macos" else desk.WCCD).is_file(),
@@ -374,6 +410,8 @@ def cmd_look(a):
 
 
 def cmd_find(a):
+    if not a.text and getattr(a, "name", ""):
+        a.text = a.name
     if a.web:
         snap = web.snapshot(target=a.target, url_contains=a.url_contains)
         nodes = web.normalize(snap.get("nodes"))
@@ -432,7 +470,7 @@ def _desk_act(a, action):
     if a.prefer:
         req["prefer"] = a.prefer
     if not (a.ref or a.name or a.ident or a.role):
-        raise SystemExit("要么给 --ref，要么给 --app/--role/--name/--id")
+        raise BadInput("要么给 --ref，要么给 --app/--role/--name/--id")
     return desk.call(req)
 
 
@@ -463,7 +501,7 @@ def cmd_do(a):
         res = _desk_act(a, "click")
     elif verb == "activate":
         if not a.app:
-            raise SystemExit("activate 需要 --app")
+            raise BadInput("activate 需要 --app")
         res = desk.activate(a.app)
         if a.json:
             return out(res, as_json=True)
@@ -474,7 +512,8 @@ def cmd_do(a):
     elif verb == "type":
         res = _desk_act(a, "type")
     else:
-        raise SystemExit("桌面通道不支持 %s；可用的：click fill type read key paste scroll" % verb)
+        raise BadInput("桌面通道不支持 %s；可用的：click fill type read key paste scroll" % verb,
+                            "VERB_UNSUPPORTED")
 
     if a.json:
         return out(res, as_json=True)
@@ -519,9 +558,16 @@ def _web_do(a):
         action = {"click": "click", "fill": "fill", "read": "read",
                   "hover": "hover", "type": "fill"}.get(verb)
         if not action:
-            raise SystemExit("网页通道不支持 %s" % verb)
+            raise BadInput("网页通道不支持 %s" % verb, "VERB_UNSUPPORTED")
         if a.ref:
-            _, tok = parse_ref(a.ref)
+            surface, tok = parse_ref(a.ref)
+            # --web 会把任何 ref 都送进这条分支。d:e12 进来后 tok 是 "e12"，
+            # 下面 int(tok) 当场抛 ValueError，用户看到的是 "FAIL ValueError:..."，
+            # 既没有错误码也没告诉他该怎么办。在这里就拦住。
+            if surface == "desk":
+                raise BadInput("这是桌面 ref（%s），网页通道不认；"
+                               "要么去掉 --web 走桌面，要么用 look --web 拿 w:N" % a.ref,
+                               "REF_MALFORMED")
             loc = {"by": "ref", "value": int(tok)}
             st = {"action": action, "locator": loc}
             st["_expect"] = (load_state().get("web", {}).get("identities", {})
@@ -539,7 +585,7 @@ def _web_do(a):
                 loc["css"] = a.css
             st = {"action": action, "locator": loc}
         else:
-            raise SystemExit("要么给 --ref，要么给 --text/--role/--css")
+            raise BadInput("要么给 --ref，要么给 --text/--role/--css")
         if action == "fill":
             st["value"] = a.text_value if a.text_value is not None else (a.text or "")
         if action == "read":
@@ -696,7 +742,7 @@ def _desk_req(step):
     elif do == "state":
         req = {"cmd": "state", "ref": step.get("ref")}
     else:
-        raise SystemExit("批量里不认识的桌面步骤：%s" % do)
+        raise BadInput("批量里不认识的桌面步骤：%s" % do, "STEP_BAD")
     return req
 
 
@@ -713,7 +759,7 @@ def _web_step(step):
         return s
     action = {"click": "click", "fill": "fill", "read": "read", "hover": "hover"}.get(do)
     if not action:
-        raise SystemExit("批量里不认识的网页步骤：%s" % do)
+        raise BadInput("批量里不认识的网页步骤：%s" % do, "STEP_BAD")
 
     loc = dict(step.get("locator") or {})
     if step.get("ref"):
@@ -732,7 +778,7 @@ def _web_step(step):
         elif step.get("text"):
             loc = {"by": "name", "value": step["text"]}
         else:
-            raise SystemExit("网页步骤要么给 ref，要么给 text/role/css")
+            raise BadInput("网页步骤要么给 ref，要么给 text/role/css")
 
     s = {"action": action, "locator": loc}
     if action == "fill":
@@ -744,10 +790,17 @@ def _web_step(step):
 def cmd_run(a):
     path = Path(a.steps).expanduser()
     if not path.is_file():
-        raise SystemExit("步骤文件不存在：%s" % path)
-    steps = json.loads(path.read_text(encoding="utf-8"))
+        raise BadInput("步骤文件不存在：%s" % path, "STEP_BAD")
+    try:
+        steps = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise BadInput("步骤文件不是合法 JSON：%s" % exc, "STEP_BAD")
+    # 两种写法都收：顶层数组，或 {"steps": [...]}。文档里只示范了一种，
+    # 调用方偏偏爱写另一种——为此丢一次往返不值得，认下来就是了。
+    if isinstance(steps, dict) and isinstance(steps.get("steps"), list):
+        steps = steps["steps"]
     if not isinstance(steps, list):
-        raise SystemExit("步骤文件必须是数组")
+        raise BadInput('步骤文件格式不对：要 JSON 数组，或 {"steps": [ ... ]}', "STEP_BAD")
 
     t0 = time.perf_counter()
     results = []
@@ -769,6 +822,11 @@ def cmd_run(a):
         desk_buf, desk_idx = [], []
 
     for i, step in enumerate(steps):
+        if not isinstance(step, dict):
+            raise BadInput("第 %d 步不是对象：%r" % (i + 1, step), "STEP_BAD")
+        # "action" 是很自然的写法，认下来。为一个键名丢一次往返不值得。
+        if not step.get("do") and step.get("action"):
+            step = dict(step, do=step["action"])
         entry = {"step": i + 1, "do": step.get("do"), "ok": True, "verdict": "ok"}
         results.append(entry)
         if step.get("web") or step.get("do") in ("goto", "press", "eval", "wait"):
@@ -814,9 +872,28 @@ def cmd_run(a):
 
 # ---------------------------------------------------------------- 入口
 
+class _JsonAwareParser(argparse.ArgumentParser):
+    """参数写错时，如果调用方要的是 JSON，就别给他 usage 散文。
+
+    这条比它看起来重要：机器调用方按契约解析 stdout，一旦拿到 usage 文本，
+    它的解析器会抛自己的异常，现场就变成一个跟本工具毫无关系的报错。
+    --json 可能在错参数后面，所以查 sys.argv 而不是查 a.json。
+    """
+
+    def error(self, message):
+        if "--json" in sys.argv[1:]:
+            print(json.dumps({"ok": False, "error": "ARG_MISSING", "kind": "bad_input",
+                              "retry": True,
+                              "hint": "参数写法不对，看 --help",
+                              "detail": message}, ensure_ascii=False))
+            raise SystemExit(1)
+        super().error(message)
+
+
 def build():
-    ap = argparse.ArgumentParser(prog="surehand", description="看得见、点了算得清的操作层")
+    ap = _JsonAwareParser(prog="surehand", description="看得见、点了算得清的操作层")
     ap.add_argument("--json", action="store_true", help="输出机器可读 JSON")
+    ap.add_argument("--version", action="version", version="surehand %s" % skill_version())
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("up", help="拉起桌面守护进程并检查两条通道")
@@ -843,6 +920,9 @@ def build():
 
     p = sub.add_parser("find", help="只找不动")
     p.add_argument("--text", default="")
+    # do 用的 --name 在这里也认：同一个概念不该按动词换名字，
+    # 否则学到 do --name 的人写 find --name 只会拿到一屏 usage。
+    p.add_argument("--name", default="")
     p.add_argument("--role", default="")
     p.add_argument("--id", dest="ident", default="")
     p.add_argument("--app", default="")
@@ -945,23 +1025,31 @@ def main(argv=None):
              "launch": cmd_launch}
     try:
         return table[a.cmd](a)
-    except RefFormatError as exc:
-        info = evidence.classify("REF_MALFORMED")
+    except BadInput as exc:
+        # RefFormatError 是它的子类，一起在这里收口：带码、带 kind、带该怎么做。
+        info = evidence.classify(exc.code)
         if a.json:
-            print(json.dumps({"ok": False, "error": "REF_MALFORMED",
-                              "kind": info["kind"], "hint": str(exc)},
-                             ensure_ascii=False))
+            print(json.dumps({"ok": False, "error": exc.code, "kind": info["kind"],
+                              "retry": info["retry"], "hint": info["hint"],
+                              "detail": str(exc)}, ensure_ascii=False))
         else:
-            print("FAIL REF_MALFORMED（%s）%s" % (info["kind"], str(exc)))
+            print("FAIL %s（%s）%s" % (exc.code, info["kind"], str(exc)))
         return 1
     except SystemExit:
         raise
     except Exception as exc:
+        # 到这里说明是本工具自己的缺陷，不是用户写错了什么。仍然要给码：
+        # "FAIL ValueError: ..." 对调用方等于零信息——他不知道这是能重试的环境问题、
+        # 是自己写错的参数，还是该来报 bug。INTERNAL 明确说是 bug，别重放。
+        info = evidence.classify("INTERNAL")
+        detail = "%s: %s" % (type(exc).__name__, str(exc)[:300])
         if a.json:
-            print(json.dumps({"ok": False, "error": "%s: %s" % (type(exc).__name__, str(exc)[:300])},
-                             ensure_ascii=False))
+            print(json.dumps({"ok": False, "error": "INTERNAL", "kind": info["kind"],
+                              "retry": info["retry"], "hint": info["hint"],
+                              "detail": detail}, ensure_ascii=False))
         else:
-            print("FAIL %s: %s" % (type(exc).__name__, str(exc)[:300]))
+            print("FAIL INTERNAL（%s）%s" % (info["kind"], info["hint"]))
+            print("  %s" % detail)
         return 1
 
 

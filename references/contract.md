@@ -179,6 +179,9 @@ Windows 的 `fill` 在没有 ValuePattern 的控件上会退到「聚焦 + 全�
 | `BAD_JSON` / `INTERNAL` | bug | 不行 | 客户端发了非法 JSON / 引擎内部异常 |
 | `REF_MALFORMED` | bad_input | 可以 | ref 写法错（漏了 `e`、用了不认识的前缀）；修正参数再试 |
 | `ARG_MISSING` | bad_input | 可以 | 缺必填参数 |
+| `VERB_UNSUPPORTED` | unsupported | 不可以 | 这条通道没有这个动词，换一个 |
+| `STEP_BAD` | bad_input | 可以 | 步骤文件读不到或格式不对 |
+| `INTERNAL` | bug | 不可以 | 工具自身缺陷；别重放，把 `--json` 输出和上一步的 look 一起反馈 |
 | `WEB_STEP_FAILED` | web | 可以 | 网页步骤失败；先 `look --web` 看页面现状 |
 | `WEB_NO_TARGET` | web | 可以 | 网页上没这个元素；先看它到底叫什么 |
 | `WEB_LAYER_DOWN` | web | 可以 | 四层定位全失败；改走截图 + 坐标 |

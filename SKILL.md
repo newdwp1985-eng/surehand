@@ -6,7 +6,7 @@ slug: surehand
 description: "操作本机电脑与浏览器的统一入口：先观察、再判断通道、再动手，每一步都带回执。原生控件走可访问性树（macOS AX / Windows UIA），读到的是结构与唯一令牌；自绘界面（微信、抖音、Qt/CEF）结构为空时自动判定为视觉通道，用窗口相对坐标 + 剪贴板；网页走 CDP。凡是需要点按钮、填表、读界面、发消息、点赞、转发、翻列表、跑多步流程的任务都先用本技能。触发词：操作电脑、帮我点一下、在微信里发消息、朋友圈点赞、转发抖音、填表、读界面、桌面自动化、浏览器操作、computer use。"
 description_zh: "操作本机电脑与浏览器的统一入口：先观察、再判断通道、再动手，每一步都带回执。原生控件走可访问性树（macOS AX / Windows UIA），读到的是结构与唯一令牌；自绘界面（微信、抖音、Qt/CEF）结构为空时自动判定为视觉通道，用窗口相对坐标 + 剪贴板；网页走 CDP。凡是需要点按钮、填表、读界面、发消息、点赞、转发、翻列表、跑多步流程的任务都先用本技能。"
 description_en: "One entry point for driving a real desktop and a real browser: observe, decide which channel, then act — and every action comes back with a receipt. Native controls go through the accessibility tree (AX on macOS, UIA on Windows) yielding structure and unique tokens; self-drawn UIs (WeChat, Douyin, Qt/CEF) collapse to a visual channel using window-relative points and the clipboard; pages go through CDP. Use it for clicking buttons, filling forms, reading UIs, sending messages, liking posts, scrolling lists, and any multi-step routine."
-version: 1.1.0
+version: 1.1.1
 author: 波弟
 category: 系统与桌面自动化
 tags: [macos, windows, desktop, browser, accessibility, uia, cdp, automation, evidence, agent, computer-use]
@@ -185,7 +185,7 @@ UIAutomationClient 程序集只在 .NET Framework 里有，pwsh 上加载不到�
 | 切前台 | `$SH activate --app 文本编辑` |
 | 观察桌面 | `$SH look --app 微信 [--depth 3] [--from e2]` |
 | 观察网页 | `$SH look --web [--url-contains 关键词]` |
-| 只找不动 | `$SH find --app 备忘录 --text 新建` / `--id Save` |
+| 只找不动 | `$SH find --app 备忘录 --text 新建` / `--name 新建` / `--id Save` |
 | 点（令牌） | `$SH do click --ref d:e12 [--strict] [--prefer ax\|cg]` |
 | 点（身份） | `$SH do click --app 计算器 --role button --id Seven` |
 | 点（窗口相对坐标） | `$SH tap --app 微信 --x 120 --y 20` |
@@ -269,6 +269,12 @@ ref 前缀：`d:e12` 桌面、`w:3` 网页。裸编号默认按桌面解析。
 
 每一步可加 `"continue": true` 表示失败也继续。默认遇 `FAIL` 停。
 
+外层写成上面的数组，或 `{"steps": [ ... ]}`，两种都收；步骤里的 `"do"` 也可以写成 `"action"`。
+
+回执是 `{"ok", "count", "total", "unverified", "elapsed_ms", "results": [...]}`，
+`results[i]` 带着这一步的 `do`、`verdict`、以及动作自己的回执（含 `delivery` 与 `via`）。
+`via` 说明是靠什么认出目标的：`ref` / `id` / `name` / `role`——排查「为什么点错了」先看这个字段。
+
 ## 8. 边界（说清楚，不硬撑）
 
 - **自绘界面只有坐标精度**：微信、抖音这类界面改版就要重新对位置。能操作，但不是确定性的。
@@ -299,6 +305,6 @@ ref 前缀：`d:e12` 桌面、`w:3` 网页。裸编号默认按桌面解析。
 自测：
 
 ```bash
-python3 scripts/selftest.py                       # macOS / Windows 通用，25 项
+python3 scripts/selftest.py                       # macOS / Windows 通用，27 项
 powershell -File engine\windows\verify.ps1        # Windows 专属验收，12 步
 ```

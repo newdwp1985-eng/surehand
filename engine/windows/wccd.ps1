@@ -29,7 +29,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Off
 
-$script:VERSION = '1.0.0'
+$script:VERSION = '1.1.1'
 $script:MUTEX_NAME = 'Local\SurehandEngine'
 $script:ENDPOINT_DIR = Join-Path $env:LOCALAPPDATA 'surehand'
 $script:ENDPOINT_FILE = Join-Path $script:ENDPOINT_DIR 'wccd.json'
@@ -436,10 +436,15 @@ $script:RegistryRoot = $null
 $script:RegistryPid = 0
 
 function Reset-Registry($rootEl, [int]$procId) {
-    $script:Registry = @{}
-    # 不清零 $script:RefCounter：编号在进程生命周期内单调递增，永不复用。
-    # 清零会让新快照的 e2 顶掉旧快照的 e2，旧 ref 不再报失效，而是静默指向
-    # 另一个元素 —— 这是最难查的一类误点。
+    # 不清空 $script:Registry，也不清零 $script:RefCounter。
+    # 清空会让「刚 find 到的令牌」在另一次观察后立刻失效；清零会让编号被复用，
+    # 旧 ref 静默指向另一个元素。两者都让调用方承担不该承担的后果。
+    # 编号单调递增 + 容量回收，是这个组合里唯一自洽的做法。
+    if ($script:Registry.Count -gt 5000) {
+        $keys = $script:Registry.Keys | Sort-Object { [int]($_ -replace '^e', '') }
+        $drop = [int]($keys.Count / 2)
+        for ($i = 0; $i -lt $drop; $i++) { $script:Registry.Remove($keys[$i]) }
+    }
     $script:RegistryRoot = $rootEl
     $script:RegistryPid = $procId
     $epoch = [int64](([DateTime]::UtcNow - [datetime]'1970-01-01').TotalMilliseconds)
@@ -726,9 +731,12 @@ function Resolve-Target($req) {
     if (($hits.Count -gt 1) -and (-not $contains)) { return @{ err = "AMBIGUOUS:$($hits.Count)" } }
     $el = $hits[0]
     $rr = Get-Role $el
+    # via 说的是「靠什么认出来的」。按 AutomationId 命中却报 via=name，
+    # 会让查「为什么点错了」的人一直盯着名字看，而真正生效的是标识符。
+    $how = if ($ident) { 'id' } elseif ($name) { 'name' } else { 'role' }
     return @{ target = @{ el = $el; role = $rr; name = (Get-Str $el 'Name').v;
                           desc = (Get-Str $el 'HelpText').v; witness = $hits.Count;
-                          via = 'name'; restricted = $false; scope = 'window' } }
+                          via = $how; restricted = $false; scope = 'window' } }
 }
 
 function Get-Center($el) {

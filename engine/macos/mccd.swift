@@ -9,7 +9,7 @@ import CoreGraphics
 import ImageIO
 import CoreText
 
-let VERSION = "1.1.0"
+let VERSION = "1.1.1"
 let SOCK_PATH = "/tmp/mccd-\(getuid()).sock"
 let LOCK_PATH = "/tmp/mccd-\(getuid()).lock"
 
@@ -170,10 +170,16 @@ final class Registry {
 
     func newSnapshot(_ window: AXUIElement, pid: pid_t) -> String {
         lock.lock(); defer { lock.unlock() }
-        map.removeAll()
-        // counter 不清零：ref 编号在本进程生命周期内单调递增，永不复用。
-        // 清零会让下一次快照的 e2 顶掉上一次的 e2——用户手里的旧 ref 不是「失效」，
-        // 而是静默指到了另一个元素上。失效会报错，指错不会，这就是误点的最短路径。
+        // 不再整表清空。清空会让「刚 find 到的令牌」在另一次观察之后立刻失效——
+        // 用户什么都没做错，只是又多看了一眼。令牌只要元素还在就该继续可用：
+        // 编号单调递增保证不会指错，verifyRef 的 pid/role/attach 检查保证失效可检出。
+        // 只按容量回收，丢掉最早的一半。
+        if map.count > 5000 {
+            let keys = map.keys.compactMap { Int($0.dropFirst()) }.sorted()
+            for k in keys.prefix(keys.count / 2) {
+                map.removeValue(forKey: "e\(k)")
+            }
+        }
         win = window
         self.pid = pid
         sid = "s\(Int(Date().timeIntervalSince1970 * 1000))"
@@ -766,11 +772,14 @@ func resolveTarget(_ req: [String: Any]) -> (Target?, String?) {
     if hits.isEmpty { return (nil, "NOT_FOUND") }
     if hits.count > 1 && !contains { return (nil, "AMBIGUOUS:\(hits.count)") }
     let el = hits[0]
+    // via 说的是「靠什么认出来的」，不是随手贴的标签。按 AXIdentifier 命中却报
+    // via=name，会让查「为什么点错了」的人一直盯着名字看，而真正生效的是标识符。
+    let how = !ident.isEmpty ? "id" : (!name.isEmpty ? "name" : "role")
     return (Target(el: el,
                    role: axStr(el, kAXRoleAttribute as String),
                    name: axStr(el, kAXTitleAttribute as String),
                    desc: axStr(el, kAXDescriptionAttribute as String),
-                   witness: hits.count, via: "name",
+                   witness: hits.count, via: how,
                    restricted: false, scope: "window"), nil)
 }
 

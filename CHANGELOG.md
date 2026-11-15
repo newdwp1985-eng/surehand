@@ -2,6 +2,39 @@
 
 格式照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号照语义化版本。
 
+## [1.1.1] — 2026-11-15
+
+1.1.0 发出去之后又测了一轮，专打「调用方按契约解析输出」这条线。四条都是同一个毛病：
+**出错时给的东西没法用**。
+
+### 修复
+
+- **`--json` 下失败一定还是 JSON**。此前 11 处参数校验走 `raise SystemExit("中文提示")`，
+  带 `--json` 时输出是一行散文、没有错误码，机器调用方解析失败后只能猜。
+  现在统一成带码结构化输出（`ARG_MISSING` / `REF_MALFORMED` / `STEP_BAD` / `VERB_UNSUPPORTED`）。
+  argparse 自己的报错也一并接管——写错动词不会再吐一屏 usage。
+- **`FAIL ValueError: invalid literal for int()`**。`--web` 配 `d:e12` 会把桌面 ref 送进
+  `int()` 当场抛异常。现在提前拦住，报 `REF_MALFORMED` 并说清「要么去掉 `--web`，
+  要么 `look --web` 拿 `w:N`」。
+- **意外异常不再裸奔**。兜底从 `FAIL <异常类名>` 改成 `INTERNAL（bug）`，
+  带 hint 明确「这是工具缺陷，不要重放」。异常类名留在 `detail` 里，不丢信息。
+- **`via` 归因说准了**（两个引擎）。按 `AXIdentifier` / `AutomationId` 命中时，
+  回执原先一律写 `via: "name"`，让排查「为什么点错了」的人一直盯着名字看，
+  而真正生效的是标识符。现在 `ref` / `id` / `name` / `role` 各归各位。
+
+### 变更
+
+- **`find` 认 `--name`**。`do` 用 `--name`、`find` 用 `--text`，同一个概念两个名字，
+  学到前者的人写后者只会拿到一屏 usage。现在两个都认。
+- **批量两种外层格式都收**：顶层数组，或 `{"steps": [...]}`；步骤里的 `"do"` 也可写成 `"action"`。
+  改文档说明回执形状（`results` / `count` / `unverified`）。
+- **两个平台引擎版本号对齐**。Windows 引擎此前停在 1.0.0，`wccd --version` 与技能版本对不上。
+
+### 新增
+
+- **自测 25 → 27 项**。新增 B13「`--json` 失败也是合法 JSON」（5 种错误路径逐一解析）、
+  B14「批量两种格式与 `via` 归因」。当前 27/27，0 跳过。
+
 ## [1.1.0] — 2026-11-15
 
 这一版来自一轮对抗性测试：故意做错事、故意读不该读的东西、故意把令牌放到过期之后。

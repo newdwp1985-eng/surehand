@@ -74,7 +74,7 @@ cli do click --ref d:e12
 | `scripts/evidence.py` | 判断层（纯函数） |
 | `scripts/transport.py` | 桌面通道客户端（跨平台） |
 | `scripts/web.py` | 网页通道适配 + 浏览器启动 |
-| `scripts/selftest.py` | 17 项自测 |
+| `scripts/selftest.py` | 27 项自测 |
 | `engine/macos/mccd.swift` | macOS 引擎 |
 | `engine/macos/build.sh` | 用系统 Swift 工具链编译 |
 | `engine/windows/wccd.ps1` | Windows 引擎 |

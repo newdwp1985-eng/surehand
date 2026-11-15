@@ -23,7 +23,22 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CLI = Path(__file__).resolve().parent / "cli.py"
-VERSION = "1.1.0"
+
+
+def _skill_version():
+    """版本号只认 SKILL.md 的 frontmatter。写死一个常量，迟早和引擎、
+    CLI 各说各话；而握手时自报的版本正是客户端用来判断「要不要升级」的依据。"""
+    try:
+        text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+    except OSError:
+        return "unknown"
+    for line in text.splitlines()[:20]:
+        if line.startswith("version:"):
+            return line.split(":", 1)[1].strip().strip('"\'')
+    return "unknown"
+
+
+VERSION = _skill_version()
 PROTOCOL = "2025-06-18"
 
 # 工具调用可能很慢（整窗遍历、等界面变化），给足时间但不无限等。

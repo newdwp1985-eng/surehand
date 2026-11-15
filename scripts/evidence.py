@@ -58,6 +58,8 @@ ERRORS = {
     # 否则用户会一遍遍 look，而真正的问题是漏写了一个 e。
     "REF_MALFORMED":     ("bad_input",  True,  "ref 写法不对：桌面用 d:e12 或 e12，网页用 w:3"),
     "ARG_MISSING":       ("bad_input",  True,  "缺少必填参数，看 --help"),
+    "VERB_UNSUPPORTED":  ("unsupported", False, "这条通道没有这个动词，换一个或看 --help"),
+    "STEP_BAD":          ("bad_input",  True,  "步骤文件读不到或格式不对：路径要对，内容是 JSON 数组或 {\"steps\": [...]}"),
     # 网页层：fastlane 的步骤级失败，此前落到 unknown 里，提示「未登记的错误」
     "WEB_STEP_FAILED":   ("web",        True,  "网页步骤失败；先 look --web 看页面当前状态"),
     "WEB_NO_TARGET":     ("web",        True,  "网页上没找到该元素；先 look --web 看它叫什么"),

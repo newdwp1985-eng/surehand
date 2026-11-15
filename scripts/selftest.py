@@ -425,10 +425,100 @@ def b_ref_never_reused():
     assert r1 and r2, "快照没发出任何令牌"
     shared = set(r1) & set(r2)
     assert not shared, "两次快照用了相同编号（被复用）：%s" % sorted(shared)[:3]
+    # 旧令牌在元素还在时应继续可用——否则「多看一眼就把手里的令牌弄废了」。
+    # 关键是它必须仍指向同一个身份：编号既然不复用，就不该改名换姓。
+    first = next(n for n in s1["nodes"] if n["ref"] == r1[0])
     st = desk.state(r1[0])
-    assert not st.get("ok"), "旧令牌在新快照之后仍然可用：%s" % st
-    assert "REF_STALE" in str(st.get("error")), st
-    return {"first": len(r1), "second": len(r2), "sample": r2[0]}
+    if st.get("ok"):
+        assert st.get("role") == first.get("role"), \
+            "旧令牌指到了别的角色：%s -> %s" % (first.get("role"), st.get("role"))
+        kept = True
+    else:
+        assert "REF_" in str(st.get("error")), st
+        kept = False
+    return {"first": len(r1), "second": len(r2), "sample": r2[0], "old_ref_usable": kept}
+
+
+def _cli(args, timeout=60):
+    return subprocess.run([sys.executable, str(HERE / "cli.py")] + args,
+                          capture_output=True, text=True, timeout=timeout)
+
+
+def b_json_errors():
+    """带 --json 的失败，必须是合法 JSON，且错误码在登记表里。
+
+    这条守的是机器调用方的命根子：它按契约解析 stdout。一旦我们吐出中文散文
+    或 "FAIL ValueError: ..."，它的解析器就会抛自己的异常，现场变成一个
+    跟本工具毫无关系的报错——排查从「看日志」变成「猜」。
+    """
+    cases = {
+        "ref 写法错":      ["do", "click", "--ref", "abc", "--json"],
+        "桌面 ref 喂网页": ["do", "click", "--ref", "d:e12", "--web", "--json"],
+        "动词不存在":      ["do", "teleport", "--json"],
+        "缺定位条件":      ["do", "click", "--json"],
+        "步骤文件不存在":  ["run", "/tmp/surehand-no-such-steps.json", "--json"],
+    }
+    bad = []
+    for tag, args in cases.items():
+        p = _cli(args)
+        raw = (p.stdout or "").strip() or (p.stderr or "").strip()
+        try:
+            j = json.loads(raw)
+        except Exception:
+            bad.append("%s → 不是 JSON：%r" % (tag, raw[:80]))
+            continue
+        code = j.get("error")
+        if not code or evidence.classify(code)["kind"] == "unknown":
+            bad.append("%s → 错误码 %r 没登记" % (tag, code))
+        if j.get("ok") is not False:
+            bad.append("%s → ok 字段不是 false" % tag)
+    assert not bad, "；".join(bad)
+    return {"cases": len(cases)}
+
+
+def b_batch_shapes():
+    """批量：两种外层格式都收，步骤里 action 与 do 同义；via 要如实说是靠 id 认的。"""
+    import tempfile
+    shapes = {
+        "顶层数组": [{"do": "activate", "app": "Finder"},
+                  {"do": "click", "app": "Finder", "role": "AXButton", "id": "no-such-id-zzz"}],
+        "steps 包装": {"steps": [{"action": "activate", "app": "Finder"}]},
+    }
+    seen = {}
+    for tag, payload in shapes.items():
+        f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
+        json.dump(payload, f, ensure_ascii=False)
+        f.close()
+        try:
+            p = _cli(["run", f.name, "--json"], timeout=120)
+        finally:
+            Path(f.name).unlink(missing_ok=True)
+        j = json.loads((p.stdout or "").strip())
+        assert "results" in j, "%s：返回里没有 results" % tag
+        seen[tag] = len(j["results"])
+    # action 是 do 的别名，必须被认下来
+    assert seen["steps 包装"] == 1, seen
+
+    # via 归因：按 AXIdentifier 命中就该说 id。说成 name 会让查「为什么点错了」
+    # 的人一直盯着名字看，而真正生效的条件是标识符。
+    calc = Path("/System/Applications/Calculator.app")
+    via = None
+    if calc.exists():
+        f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
+        json.dump([{"do": "activate", "app": "Calculator"},
+                   {"do": "click", "app": "Calculator", "id": "Seven"}], f,
+                  ensure_ascii=False)
+        f.close()
+        try:
+            p = _cli(["run", f.name, "--json"], timeout=120)
+        finally:
+            Path(f.name).unlink(missing_ok=True)
+        j = json.loads((p.stdout or "").strip())
+        clk = (j.get("results") or [{}, {}])[1].get("result") or {}
+        via = clk.get("via")
+        if clk.get("ok"):
+            assert via == "id", "按 id 定位却报了 via=%r" % via
+    return {"shapes": seen, "via": via}
 
 
 def b_bad_ref():
@@ -587,6 +677,8 @@ def main():
     check("B10 read 必须返回值", b_read_value, "B")
     check("B11 令牌编号不复用", b_ref_never_reused, "B")
     check("B12 参数错与目标失效分开", b_bad_ref, "B")
+    check("B13 json 失败也是合法 JSON", b_json_errors, "B")
+    check("B14 批量两种格式与 via 归因", b_batch_shapes, "B")
 
     check("C1 CDP 可用", c_health, "C")
     check("C2 网页快照", c_snapshot, "C")
