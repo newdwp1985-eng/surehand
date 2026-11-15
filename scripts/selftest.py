@@ -396,6 +396,39 @@ def a_error_registry():
     return {"registry": len(evidence.ERRORS)}
 
 
+def a_engine_version_rule():
+    """引擎新旧怎么判：只在「引擎更旧」时换，且必须按数字比。
+
+    这条规则错了，代价是每次调用都重启一次引擎——比它要修的问题更糟。
+    按字符串比 "1.10.0" < "1.9.0" 会得出 True，正好反过来。
+    """
+    lt = desk._semver_lt
+    assert lt("1.1.1", "1.1.2") is True
+    assert lt("1.1.2", "1.1.2") is False
+    assert lt("1.1.1", "1.10.0") is True, "按字符串比会把 1.10 判成比 1.1 小"
+    assert lt("1.10.0", "1.9.0") is False, "1.10 不该被判成更旧"
+    assert lt("1.2.0", "1.1.9") is False
+    return {"cases": 5}
+
+
+def b_engine_follows_skill():
+    """升级技能后引擎要跟着换。
+
+    引擎常驻、握手不校验版本，不换的后果是新 CLI 静默跑在旧引擎上。
+    这里验后半段：停掉再起，起来的引擎必须自报当前技能版本。
+    """
+    desk.stop()
+    end = time.time() + 10
+    while time.time() < end and desk.alive():
+        time.sleep(0.1)
+    assert not desk.alive(), "引擎停不下来"
+    assert desk.start() is True, "引擎没能重新起来"
+    have, want = desk.daemon_version(), desk.skill_version()
+    assert have and want, "读不到版本：have=%r want=%r" % (have, want)
+    assert have == want, "引擎 %s 与技能 %s 不一致" % (have, want)
+    return {"version": have}
+
+
 def b_read_value():
     """read 必须把值给出来。只回一句「完成」，调用方等于没读到。"""
     desk.activate("Calculator")
@@ -664,6 +697,7 @@ def main():
     check("A5 通道判定", a_summarize)
     check("A6 定位不取第一个", a_choose)
     check("A7 错误码全登记", a_error_registry)
+    check("A8 引擎新旧判断", a_engine_version_rule)
 
     check("B1 单实例租约", b_lease, "B")
     check("B2 权限与环境", b_health, "B")
@@ -679,6 +713,7 @@ def main():
     check("B12 参数错与目标失效分开", b_bad_ref, "B")
     check("B13 json 失败也是合法 JSON", b_json_errors, "B")
     check("B14 批量两种格式与 via 归因", b_batch_shapes, "B")
+    check("B15 引擎跟着技能版本走", b_engine_follows_skill, "B")
 
     check("C1 CDP 可用", c_health, "C")
     check("C2 网页快照", c_snapshot, "C")

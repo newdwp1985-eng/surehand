@@ -9,7 +9,7 @@ import CoreGraphics
 import ImageIO
 import CoreText
 
-let VERSION = "1.1.1"
+let VERSION = "1.1.2"
 let SOCK_PATH = "/tmp/mccd-\(getuid()).sock"
 let LOCK_PATH = "/tmp/mccd-\(getuid()).lock"
 

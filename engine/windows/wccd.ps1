@@ -29,7 +29,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Off
 
-$script:VERSION = '1.1.1'
+$script:VERSION = '1.1.2'
 $script:MUTEX_NAME = 'Local\SurehandEngine'
 $script:ENDPOINT_DIR = Join-Path $env:LOCALAPPDATA 'surehand'
 $script:ENDPOINT_FILE = Join-Path $script:ENDPOINT_DIR 'wccd.json'

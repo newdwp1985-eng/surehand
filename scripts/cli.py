@@ -40,15 +40,9 @@ MAX_IDENTITIES = 600
 
 
 def skill_version():
-    """版本号只有一个源头：SKILL.md 的 frontmatter。
-
-    在 cli 里另写一个常量，迟早和引擎、MCP server 各说各话——
-    调用方问「你跑的是哪个版本」，得到三个答案比没有答案更糟。
-    """
-    try:
-        text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
-    except OSError:
-        return "unknown"
+    """版本号只有一个源头：SKILL.md 的 frontmatter。实现在 transport 里，
+    因为「引擎该不该换」要在那层判断；这里只是给它一个短名字。"""
+    return desk.skill_version() or "unknown"
     for line in text.splitlines()[:20]:
         if line.startswith("version:"):
             return line.split(":", 1)[1].strip().strip('"\'')

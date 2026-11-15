@@ -49,6 +49,22 @@ class DeskError(Exception):
     pass
 
 
+def skill_version():
+    """版本号只认 SKILL.md 的 frontmatter。
+
+    放在 transport 这一层，是因为「引擎该不该换」要在这里判断；
+    cli 的 --version 与 doctor 也复用它，避免两处各写一个。
+    """
+    try:
+        text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    for line in text.splitlines()[:20]:
+        if line.startswith("version:"):
+            return line.split(":", 1)[1].strip().strip('"\'')
+    return ""
+
+
 # ---------------------------------------------------------------- 端点
 
 def endpoint_info():
@@ -189,10 +205,98 @@ def _powershell():
     raise DeskError("找不到 PowerShell")
 
 
-def start(quiet=True):
-    """确保引擎在跑。True 表示本次真的启了一个。"""
-    if alive():
+def daemon_version():
+    """正在跑的那个引擎自报的版本。连不上就返回空串。
+
+    用 ping 而不是 health：引擎没有 health 这个命令，
+    猜错名字的后果是「永远读到空版本」，于是换引擎的逻辑静默失效——
+    这正是它要防的那类错。
+    """
+    return str((probe(3.0) or {}).get("version") or "")
+
+
+SWAP = ROOT / ".engine.swap"
+
+
+def _semver_lt(a, b):
+    """a 是否比 b 旧。比不出来就当「不旧」，宁可不换也不乱换。"""
+    def key(v):
+        parts = []
+        for p in str(v).split("."):
+            digits = "".join(c for c in p if c.isdigit())
+            parts.append(int(digits) if digits else 0)
+        return tuple((parts + [0, 0, 0])[:3])
+    try:
+        return key(a) < key(b)
+    except Exception:
         return False
+
+
+def _swap_marker():
+    try:
+        return SWAP.read_text(encoding="utf-8").strip()
+    except Exception:
+        return ""
+
+
+def _set_swap_marker(v):
+    try:
+        SWAP.write_text(v, encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _retire_engine():
+    """让旧引擎退场。先礼后兵：shutdown 优雅退出，等不到再发信号。"""
+    pid = int((probe(3.0) or {}).get("pid") or 0)
+    try:
+        with _open(3.0) as ses:
+            ses.call({"cmd": "shutdown"})
+    except Exception:
+        pass
+    deadline = time.time() + 3.0
+    while time.time() < deadline:
+        if not alive():
+            return True
+        time.sleep(0.05)
+    if pid > 0:
+        try:
+            os.kill(pid, 15)
+            time.sleep(0.3)
+        except Exception:
+            pass
+    return not alive()
+
+
+def start(quiet=True):
+    """确保引擎在跑，且跑的是当前这份技能的引擎。
+
+    引擎是常驻的，握手又不校验版本。升级技能之后旧进程还在，
+    新 CLI 会静默地用着旧引擎——新错误码它不认识、刚修好的语义它照旧。
+    用户什么都没做错，只是「更新了一下」。所以版本对不上就换掉它。
+    """
+    if alive():
+        have, want = daemon_version(), skill_version()
+        if not (have and want) or have == want:
+            return False
+        # 直接写 stderr：这是「你刚更新的东西没生效」的唯一提示，
+        # 藏着不说比不修更糟。--json 时 stdout 仍然只有一行 JSON。
+        if not _semver_lt(have, want):
+            # 引擎比技能新：多半是这台机器上还有另一份更新的安装。
+            # 换掉它反而倒退，只提示。
+            print("引擎是 %s，技能是 %s；引擎更新，继续用它（两份安装不同步？）"
+                  % (have, want), file=sys.stderr)
+            return False
+        if _swap_marker() == want:
+            # 换过一次还是对不上，说明源码与 SKILL.md 本来就不一致。
+            # 再换就是每次调用重启一次引擎，比问题本身更糟。
+            print("引擎仍是 %s（技能 %s）；已尝试更换未成功，"
+                  "请确认 engine 源码与 SKILL.md 版本一致" % (have, want), file=sys.stderr)
+            return False
+        print("引擎版本 %s 与技能 %s 不一致，换用新引擎" % (have, want), file=sys.stderr)
+        _set_swap_marker(want)
+        if not _retire_engine():
+            raise DeskError("旧引擎（%s）退不掉，请手动结束 pid 后重试" % have)
     if PLATFORM == "macos":
         _ensure_macos_bin()
         proc = _spawn([str(BIN)])

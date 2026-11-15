@@ -6,6 +6,8 @@ __pycache__/
 
 # 运行时状态：ref 身份表随每次快照重建，不该进版本库
 .state.json
+# 换引擎的一次性标记：记住「为哪个版本换过」，防止版本对不上时反复重启
+.engine.swap
 
 # 编译产物：macOS 引擎首次 up 时自动编译
 engine/macos/bin/
