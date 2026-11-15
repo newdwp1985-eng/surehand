@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/icon.png" width="112" alt="Surehand">
+</p>
+
 # Surehand
 
 **让 Agent 操作电脑时说得清「凭什么」。**
