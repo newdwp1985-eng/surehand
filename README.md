@@ -86,7 +86,7 @@ Surehand 的坐标点击老实报 `uncertain`，并独立给出 `retry: safe|uns
 
 ```bash
 xcode-select --install          # 只需一次
-git clone https://github.com/<you>/surehand.git ~/.workbuddy/skills/surehand
+git clone https://github.com/newdwp1985-eng/surehand.git ~/.workbuddy/skills/surehand
 cd ~/.workbuddy/skills/surehand
 python3 scripts/cli.py up       # 首次会自动编译 engine/macos，约 20 秒
 ```
@@ -103,7 +103,7 @@ python3 scripts/cli.py up       # 首次会自动编译 engine/macos，约 20 �
 需要 Python 3.8+。**其余零依赖**——系统自带的 Windows PowerShell 5.1 就够了。
 
 ```powershell
-git clone https://github.com/<you>/surehand.git $env:USERPROFILE\.workbuddy\skills\surehand
+git clone https://github.com/newdwp1985-eng/surehand.git $env:USERPROFILE\.workbuddy\skills\surehand
 cd $env:USERPROFILE\.workbuddy\skills\surehand
 python scripts\cli.py up
 ```
