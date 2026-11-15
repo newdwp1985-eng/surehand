@@ -98,6 +98,23 @@ python3 scripts/cli.py up       # 首次会自动编译 engine/macos，约 20 �
 
 少一项，对应通道会降级，`up` 会直接告诉你缺哪个。
 
+### 装到别的宿主（DeepSeek Harness 之类）
+
+宿主不同，技能目录就不同。DSH 会扫这几处，靠前的优先：
+项目根下的 `.dsh/skills`、`.agents/skills`，然后是用户级的 `~/.dsh/skills`、`~/.agents/skills`。
+装到 `~/.dsh/skills` 就对它所有工作区生效：
+
+```bash
+./install.sh ~/.dsh/skills/surehand
+surehand up
+```
+
+`install.sh` 默认复制而不是做软链接——宿主自己的文件服务可能拒绝指向允许根目录之外的软链接。
+它顺手把 `surehand` 接到 `~/.local/bin`，之后文档里的命令在任何目录都能用。
+
+授权对象要选对：命令由哪个程序代为执行，就在**辅助功能 / 屏幕录制**里勾那个程序。
+在终端里直接跑就勾终端；让 DSH 去跑，就勾 DSH 本身。
+
 ### Windows
 
 需要 Python 3.8+。**其余零依赖**——系统自带的 Windows PowerShell 5.1 就够了。
