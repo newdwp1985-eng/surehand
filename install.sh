@@ -34,8 +34,13 @@ case "$TARGET" in
     *) echo "目标必须是绝对路径：$TARGET"; exit 2 ;;
 esac
 
+# 变量一律写成 ${VAR}：macOS 的 /bin/sh 是 bash 3.2，不是 UTF-8 感知的。
+# 写成 $VAR 再接全角标点时，它会把该字符的首字节吃进变量名，结果变量展开为空、
+# 标点也被削掉半个字节（实测：`$TARGET（` 输出成 `\xbc\x88`）。花括号能定住边界。
+if [ "$MODE" = "link" ]; then MODE_LABEL="符号链接"; else MODE_LABEL="复制"; fi
+
 echo "源目录：$SRC"
-echo "目标：  $TARGET（$([ "$MODE" = "link" ] && echo 符号链接 || echo 复制)）"
+echo "目标：  ${TARGET}（${MODE_LABEL}）"
 
 if [ "$SRC" = "$TARGET" ]; then
     echo "已经在目标目录里，跳过放置。"
@@ -77,7 +82,7 @@ if mkdir -p "$BINDIR" 2>/dev/null; then
         *) echo "  注意：$BINDIR 不在 PATH 里，需要自己加一行，或直接用完整路径。" ;;
     esac
 else
-    echo "没能写入 $BINDIR，跳过入口链接。"
+    echo "没能写入 ${BINDIR}，跳过入口链接。"
 fi
 
 case "$(uname -s)" in
