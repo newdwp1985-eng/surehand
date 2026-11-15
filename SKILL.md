@@ -6,7 +6,7 @@ slug: surehand
 description: "操作本机电脑与浏览器的统一入口：先观察、再判断通道、再动手，每一步都带回执。原生控件走可访问性树（macOS AX / Windows UIA），读到的是结构与唯一令牌；自绘界面（微信、抖音、Qt/CEF）结构为空时自动判定为视觉通道，用窗口相对坐标 + 剪贴板；网页走 CDP。凡是需要点按钮、填表、读界面、发消息、点赞、转发、翻列表、跑多步流程的任务都先用本技能。触发词：操作电脑、帮我点一下、在微信里发消息、朋友圈点赞、转发抖音、填表、读界面、桌面自动化、浏览器操作、computer use。"
 description_zh: "操作本机电脑与浏览器的统一入口：先观察、再判断通道、再动手，每一步都带回执。原生控件走可访问性树（macOS AX / Windows UIA），读到的是结构与唯一令牌；自绘界面（微信、抖音、Qt/CEF）结构为空时自动判定为视觉通道，用窗口相对坐标 + 剪贴板；网页走 CDP。凡是需要点按钮、填表、读界面、发消息、点赞、转发、翻列表、跑多步流程的任务都先用本技能。"
 description_en: "One entry point for driving a real desktop and a real browser: observe, decide which channel, then act — and every action comes back with a receipt. Native controls go through the accessibility tree (AX on macOS, UIA on Windows) yielding structure and unique tokens; self-drawn UIs (WeChat, Douyin, Qt/CEF) collapse to a visual channel using window-relative points and the clipboard; pages go through CDP. Use it for clicking buttons, filling forms, reading UIs, sending messages, liking posts, scrolling lists, and any multi-step routine."
-version: 1.0.2
+version: 1.1.0
 author: 波弟
 category: 系统与桌面自动化
 tags: [macos, windows, desktop, browser, accessibility, uia, cdp, automation, evidence, agent, computer-use]
@@ -65,6 +65,31 @@ UIAutomationClient 程序集只在 .NET Framework 里有，pwsh 上加载不到�
 还有一条：**以管理员身份运行的窗口（UAC 提升过的）对普通权限进程是不可见的**，
 这是 Windows 的 UIPI 保护，不是本工具的限制。要操作它们，本工具也得用管理员身份启动。
 
+## 0.5 接进任意 agent（MCP）
+
+技能格式只有认识 `SKILL.md` 的宿主会读。要让 Claude Code、Cursor、Codex 这类客户端也能用，
+走 MCP：
+
+```json
+{
+  "mcpServers": {
+    "surehand": {
+      "command": "python3",
+      "args": ["<技能目录>/scripts/mcp_server.py"]
+    }
+  }
+}
+```
+
+标准 stdio JSON-RPC，零第三方依赖，12 个工具：`surehand_doctor`、`surehand_apps`、
+`surehand_activate`、`surehand_look`、`surehand_find`、`surehand_do`、`surehand_tap`、
+`surehand_shot`、`surehand_state`、`surehand_web`、`surehand_launch_browser`、`surehand_run`。
+
+这一层只是管道：每个工具都转成一次 CLI 调用，判断逻辑仍然只在 `evidence.py` 里，
+不会出现「MCP 一套规则、CLI 另一套」。
+
+各宿主的配置位置见仓库根目录的 `AGENTS.md`。
+
 ## 1. 两个平台，同一套判断
 
 | | macOS | Windows |
@@ -95,7 +120,7 @@ UIAutomationClient 程序集只在 .NET Framework 里有，pwsh 上加载不到�
 | `structure` | 读得到完整结构（访达/资源管理器、计算器、原生对话框、开了 AX/UIA 的 Electron） | 用 `ref` 或 `--id` 精确操作 |
 | `visual` | 结构面只有窗口框和红绿灯（微信 4.x、抖音、多数 Qt/游戏） | `shot` 拿几何 → `tap` 按**窗口内点数**点 → 写文字一律 `paste` |
 | `partial` | 遍历没走完（`--depth` 限制、节点上限、或某个子树读不出来） | 只够摸结构，要动手先去掉限制或 `--from` 钻进去 |
-| `web` | 网页 | `--web`，按可访问名/ref 操作 |
+| `web` | 网页 | `--web`，按可访问名/ref 操作；`do read --ref w:N` 直接给文本 |
 
 判据是「去掉窗口框和红绿灯之后还剩多少个**有意义**的目标」，不是节点数。
 微信整窗 6 个节点会被判成 `visual`，计算器 35 个节点判成 `structure`。
@@ -171,7 +196,8 @@ UIAutomationClient 程序集只在 .NET Framework 里有，pwsh 上加载不到�
 | 滚动（自绘列表） | `$SH scroll --app 抖音 --x 600 --y 400 --dy -6 --times 3` |
 | 悬停 | `$SH hover --app 微信 --x 500 --y 300` |
 | 截图（可叠网格） | `$SH shot --app 微信 [--grid] [--out /tmp/a.png]` |
-| 读状态 | `$SH state --ref d:e12 [--strict]` |
+| 读文本（直接给值） | `$SH do read --ref d:e12` |
+| 读状态（全字段） | `$SH state --ref d:e12 [--strict]` |
 | 诊断为什么找不到 | `$SH attrs --ref d:e4` 或 `--x 544 --y 653` |
 | 网页导航 | `$SH do goto --url https://...` |
 | 网页填充/点击 | `$SH do fill --web --text 账号 --text-value 丁伟平` / `$SH do click --web --ref w:3` |
@@ -214,7 +240,7 @@ ref 前缀：`d:e12` 桌面、`w:3` 网页。裸编号默认按桌面解析。
 
 ```json
 {"ok": true, "via": "ref", "method": "invoke",
- "delivery": {"state": "delivered", "retry": "unsafe", "witness": "ax_action_result"}}
+ "delivery": {"state": "delivered", "retry": "n/a", "witness": "ax_action_result"}}
 ```
 
 `witness` 是判定依据，只有四种：
@@ -255,6 +281,10 @@ ref 前缀：`d:e12` 桌面、`w:3` 网页。裸编号默认按桌面解析。
   macOS 侧坐标用全局显示系，未做逐屏换算。
 - **慢树**：访达这类应用单属性往返就要 30~40 ms，整窗遍历 7~9 秒。这是 macOS AX 的固有问题，
   不是实现问题；用 `--depth` 摸结构、`--from` 钻取来绕。
+- **iframe 内部不在快照里**：网页快照只覆盖主文档，会如实报 `frame_count`，
+  不递归进 frame；要操作框架内的元素，先 `do goto` 打开它自己的地址。
+- **网页快照含只读节点**：`[只读]` 标记的是结果区、标题这类不能点但必须读得到的元素。
+  少了它们，点完按钮只能靠截图猜结果。
 - **`AXObserver` 未接**：`waitchange` 仍是轮询。
 - **仅 macOS 与 Windows**。Linux 会明确报「不支持的平台」，不会假装能跑。
 
@@ -269,6 +299,6 @@ ref 前缀：`d:e12` 桌面、`w:3` 网页。裸编号默认按桌面解析。
 自测：
 
 ```bash
-python3 scripts/selftest.py                       # macOS / Windows 通用，17 项
+python3 scripts/selftest.py                       # macOS / Windows 通用，25 项
 powershell -File engine\windows\verify.ps1        # Windows 专属验收，12 步
 ```

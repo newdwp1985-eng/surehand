@@ -28,6 +28,7 @@ from pathlib import Path
 
 SKILL = Path(__file__).resolve().parent.parent
 CLI = SKILL / "vendor" / "browser" / "fastlane.py"
+CDP_LIB = SKILL / "vendor" / "browser" / "cdp.py"
 
 # 启一个带调试端口的浏览器。为什么要独立 profile：Chrome/Edge 在已有实例运行时，
 # 会把新命令行的参数直接忽略并交给旧实例处理——--remote-debugging-port 因此不生效。
@@ -84,34 +85,82 @@ def launch(port=9222, profile=None, url="about:blank"):
     if extra:
         args = extra.split() + args
 
-    launched = False
-    if sys.platform == "darwin":
-        for app in _MAC_APP_NAMES:
-            if exe.startswith(app):
-                r = subprocess.run(["open", "-na", _MAC_APP_NAMES[app], "--args"] + args,
-                                   capture_output=True, text=True)
-                launched = (r.returncode == 0)
-                break
-    if not launched:
-        kw = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "close_fds": True}
+    # 启动方式：直接 Popen 优先，open -na 兜底。
+    # 反过来试过：macOS 上 `open -na ... --args` 在本机返回 0 却不起进程
+    # （LaunchServices 把参数吞了），于是轮询 25 秒后报超时，看起来像端口被拦。
+    # Popen + start_new_session 实测能活，且 stderr 抓得到，失败时能说清原因。
+    log_path = Path(tempfile.mkstemp(prefix="surehand-chrome-", suffix=".log")[1])
+    log_fh = open(log_path, "wb")
+    proc = None
+    try:
+        kw = {"stdout": log_fh, "stderr": log_fh, "close_fds": True}
         if sys.platform == "win32":
             # DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB：不只要脱离控制台，
             # 还要脱离宿主所在的 Job 对象，否则宿主一退出整棵子进程树跟着被收掉。
             kw["creationflags"] = 0x00000008 | 0x01000000
         else:
             kw["start_new_session"] = True
-        subprocess.Popen([exe] + args, **kw)
+        proc = subprocess.Popen([exe] + args, **kw)
+    except Exception as exc:
+        launched_error = str(exc)[:200]
+    else:
+        launched_error = ""
+    finally:
+        log_fh.close()
+
+    def diagnose():
+        try:
+            tail = log_path.read_text(encoding="utf-8", errors="replace")[-2500:]
+        except Exception:
+            tail = ""
+        low = tail.lower()
+        if "sandbox initialization failed" in low or "operation not permitted" in low:
+            return ("Chrome 的子进程沙箱被内核拒绝，浏览器起来就退出。"
+                    "这是运行环境（容器 / 受限会话）的限制，不是命令写错。"
+                    "确认你信任当前环境后，可用 SUREHAND_CHROME_FLAGS=\"--no-sandbox\" 重试。")
+        if "address already in use" in low or "bind() failed" in low:
+            return "调试端口已被别的进程占用，换一个 --port。"
+        if "cannot create default profile" in low or "profile" in low and "lock" in low:
+            return "profile 目录被占用：先关掉用同一 profile 的浏览器，或换一个 --profile 路径。"
+        if "singletonlock" in low:
+            return "profile 里有上次残留的单实例锁；删掉该 profile 下的 Singleton* 再试。"
+        return ""
 
     deadline = time.time() + 25
     while time.time() < deadline:
         h = health(port=port)
         if h.get("cdp_alive"):
+            try:
+                log_path.unlink()
+            except OSError:
+                pass
             return {"ok": True, "already": False, "port": port, "profile": str(prof),
                     "binary": exe, **h}
+        # 主进程已经退出就不会再好了，不必把 25 秒等满。
+        if proc is not None and proc.poll() is not None:
+            break
         time.sleep(0.3)
+
+    if launched_error:
+        return {"ok": False, "error": "LAUNCH_FAILED", "hint": launched_error,
+                "profile": str(prof), "binary": exe, "log": str(log_path)}
+    why = diagnose()
+    if why:
+        return {"ok": False, "error": "SANDBOX_BLOCKED" if "沙箱" in why else "LAUNCH_FAILED",
+                "hint": why, "profile": str(prof), "binary": exe,
+                "log": str(log_path), "log_tail": _tail(log_path)}
     return {"ok": False, "error": "CDP_TIMEOUT",
-            "hint": "浏览器起来了但调试端口没就绪；看是否被安全软件拦了 --remote-debugging-port。",
-            "profile": str(prof), "binary": exe}
+            "hint": ("浏览器进程还在，但调试端口一直没就绪。可能被安全软件拦了 "
+                     "--remote-debugging-port，或这个 Chrome 版本忽略该参数（用独立 profile 再试）。"),
+            "profile": str(prof), "binary": exe, "log": str(log_path),
+            "log_tail": _tail(log_path)}
+
+
+def _tail(path, n=1200):
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="replace")[-n:]
+    except Exception:
+        return ""
 
 
 
@@ -212,11 +261,16 @@ def normalize(nodes):
             "role": role,
             "name": (name or "").strip()[:120],
             "tag": n.get("tag"),
+            # 可读但不可操作（pre / 结果区 / 标题）。不标这个，调用方会把
+            # 一个 div 当按钮去点，然后拿到 NO_ACTION_PATH 却不知道为什么。
+            "actionable": bool(n.get("actionable", True)),
             "witness": 1,          # CDP 侧按选择器唯一命中即等唯一
             "evidence": {},
         }
         if n.get("value"):
             item["value"] = str(n["value"])[:300]
+        if n.get("text"):
+            item["text"] = str(n["text"])[:300]
         if n.get("href"):
             item["href"] = n["href"]
         attrs = n.get("attrs") or {}
@@ -305,6 +359,24 @@ def act_on(step, host="127.0.0.1", port=9222, target=None, url_contains=None,
             if not item.get("ok"):
                 out["error"] = item.get("error") or "WEB_STEP_FAILED"
                 break
+    # read 的答案是动作的产物，必须提到顶层。留在 attempts[].detail 里，
+    # 调用方拿到的就只是「完成」两个字——读到了却不告诉他，等于没读。
+    if step.get("action") == "read":
+        val = None
+        for attempt in (last.get("attempts") or []):
+            detail = attempt.get("detail") or {}
+            if detail.get("result") is not None:
+                val = detail.get("result")
+                break
+            if detail.get("value") is not None:
+                val = detail.get("value")
+                break
+        if val is None:
+            val = last.get("result")
+        if val is None:
+            val = (last.get("hit") or {}).get("text")
+        if val is not None:
+            out["value"] = val
     return out
 
 

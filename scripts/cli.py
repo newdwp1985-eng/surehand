@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -155,22 +156,53 @@ def print_look_web(nodes, snap, summary):
             bits.append("=" + repr(n["value"])[:40])
         if n.get("enabled") is False:
             bits.append("[disabled]")
+        if n.get("actionable") is False:
+            bits.append("[只读]")
         print(" | ".join(bits))
+    frames = snap.get("frame_count") or 0
+    if frames:
+        labels = [x for x in (snap.get("frames") or []) if x]
+        print("  ! 页面含 %d 个内嵌框架，其内部元素不在本次快照里%s"
+              % (frames, ("：%s" % "、".join(labels[:3])) if labels else ""))
+        print("    要操作框架内的元素，用 do goto 打开该框架自己的地址，或直接对整页截图走视觉通道。")
 
 
 # ---------------------------------------------------------------- ref 解析
 
+class RefFormatError(Exception):
+    """ref 写法本身不合法。与「目标消失」是两件事，不能共用 REF_STALE。"""
+
+
+_REF_DESK = re.compile(r"^(?:e)?(\d+)$", re.I)
+_REF_WEB = re.compile(r"^(\d+)$")
+
+
 def parse_ref(ref):
-    """d:e12 → 桌面令牌；w:12 → 网页令牌；裸编号按当前上下文猜桌面。"""
+    """d:e12 / e12 → 桌面令牌；w:3 → 网页令牌。
+
+    非法写法抛 RefFormatError 而不是硬塞给引擎：引擎查不到只会回 REF_STALE，
+    提示「目标已不在，重新 look」——用户照着做一万次也不会发现是自己少写了个 e。
+    """
     if not ref:
         return (None, None)
-    if ":" in ref:
-        head, tail = ref.split(":", 1)
-        if head in ("d", "desk"):
-            return ("desk", tail)
-        if head in ("w", "web"):
-            return ("web", tail)
-    return ("desk", ref)
+    r = str(ref).strip()
+    low = r.lower()
+    if low.startswith(("w:", "web:")):
+        tail = r.split(":", 1)[1]
+        m = _REF_WEB.match(tail)
+        if not m:
+            raise RefFormatError("网页 ref 应写成 w:3 这种形式，收到 %r" % ref)
+        return ("web", m.group(1))
+    if low.startswith(("d:", "desk:")):
+        tail = r.split(":", 1)[1]
+        m = _REF_DESK.match(tail)
+        if not m:
+            raise RefFormatError("桌面 ref 应写成 d:e12 或 e12，收到 %r" % ref)
+        return ("desk", "e" + m.group(1))
+    m = _REF_DESK.match(r)
+    if m:
+        return ("desk", "e" + m.group(1))
+    raise RefFormatError("认不出的 ref %r：桌面用 d:e12 或 e12，网页用 w:3" % ref)
 
 
 def require_desk_ref(ref):
@@ -248,7 +280,13 @@ def cmd_doctor(a):
            "state_file": str(STATE), "state_exists": STATE.is_file(),
            "binaries": {"engine": str(desk.BIN if desk.PLATFORM == "macos" else desk.WCCD),
                         "engine_exists": (desk.BIN if desk.PLATFORM == "macos" else desk.WCCD).is_file(),
-                        "browser": str(web.CLI), "browser_exists": web.CLI.is_file()}}
+                        "browser": str(web.CLI), "browser_exists": web.CLI.is_file(),
+                        "cdp_lib": str(web.CDP_LIB), "cdp_lib_exists": web.CDP_LIB.is_file()}}
+    if not web.CDP_LIB.is_file():
+        # 这一项缺失时网页通道会在真正用到时才炸，报错还指向别的技能。
+        # 自包含是这个仓库的核心承诺，必须能在体检里一眼看出来。
+        rep["ok"] = False
+        rep["warning"] = "缺少 vendor/browser/cdp.py，网页通道不可用（仓库不完整）"
     if desk.PLATFORM == "unsupported":
         rep["ok"] = False
         rep["warning"] = "不支持的平台 %s，本技能只覆盖 macOS 与 Windows" % sys.platform
@@ -306,10 +344,12 @@ def cmd_look(a):
     if a.web:
         snap = web.snapshot(target=a.target, url_contains=a.url_contains)
         nodes = web.normalize(snap.get("nodes"))
+        n_act = sum(1 for n in nodes if n.get("actionable", True))
+        n_read = len(nodes) - n_act
         summary = {"ok": True, "surface": "web", "complete": True,
-                   "tokens": len(nodes), "handles": 0, "withheld": 0,
+                   "tokens": n_act, "handles": n_read, "withheld": 0,
                    "visited": len(nodes), "scope": "page", "snapshot_id": "",
-                   "why": "%d 个可交互元素" % len(nodes)}
+                   "why": "%d 个可操作  %d 个只读" % (n_act, n_read)}
         remember_web(snap, nodes)
         if a.json:
             return out({"ok": True, "surface": "web", "summary": summary,
@@ -439,6 +479,18 @@ def cmd_do(a):
     if a.json:
         return out(res, as_json=True)
     print(evidence.describe(res))
+    if verb == "read":
+        # read 是纯读操作：没有「投递」这回事，只有「读到什么」。
+        # 用 click 的投递语义去描述它，会让调用方以为读也有不确定性。
+        val = res.get("value")
+        if val is None and isinstance(res.get("text"), str):
+            val = res.get("text")
+        if val is None:
+            print("  没有可读文本（元素存在但值为空）")
+            return 0
+        shown = val if len(str(val)) <= 2000 else str(val)[:2000] + "…"
+        print("  %s" % shown)
+        return 0
     d = evidence.delivery(res)
     line = "  %s" % (res.get("method") or res.get("role") or "")
     if res.get("before") != res.get("after") and res.get("before") is not None:
@@ -893,6 +945,15 @@ def main(argv=None):
              "launch": cmd_launch}
     try:
         return table[a.cmd](a)
+    except RefFormatError as exc:
+        info = evidence.classify("REF_MALFORMED")
+        if a.json:
+            print(json.dumps({"ok": False, "error": "REF_MALFORMED",
+                              "kind": info["kind"], "hint": str(exc)},
+                             ensure_ascii=False))
+        else:
+            print("FAIL REF_MALFORMED（%s）%s" % (info["kind"], str(exc)))
+        return 1
     except SystemExit:
         raise
     except Exception as exc:

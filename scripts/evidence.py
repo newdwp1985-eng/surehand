@@ -54,6 +54,14 @@ ERRORS = {
     "BAD_TOKEN":         ("env",        True,  "引擎握手的令牌不对，端点文件可能过期；重启引擎"),
     "BAD_JSON":          ("bug",        False, "发出去的不是合法 JSON 行"),
     "INTERNAL":          ("bug",        False, "引擎内部异常，看引擎日志"),
+    # 入力层：参数本身写错了。这一类必须和「目标消失」分开报，
+    # 否则用户会一遍遍 look，而真正的问题是漏写了一个 e。
+    "REF_MALFORMED":     ("bad_input",  True,  "ref 写法不对：桌面用 d:e12 或 e12，网页用 w:3"),
+    "ARG_MISSING":       ("bad_input",  True,  "缺少必填参数，看 --help"),
+    # 网页层：fastlane 的步骤级失败，此前落到 unknown 里，提示「未登记的错误」
+    "WEB_STEP_FAILED":   ("web",        True,  "网页步骤失败；先 look --web 看页面当前状态"),
+    "WEB_NO_TARGET":     ("web",        True,  "网页上没找到该元素；先 look --web 看它叫什么"),
+    "WEB_LAYER_DOWN":    ("web",        True,  "四层全都失败；改用截图 + 坐标，或检查页面是否被弹窗遮住"),
 }
 
 # 这些错误一旦发生，说明「状态未知」，绝不能盲目重放写操作
@@ -125,9 +133,13 @@ def delivery(res) -> dict:
     if not d:
         return {"state": "uncertain" if res.get("ok") else "not_delivered",
                 "retry": "unsafe", "witness": "unreported"}
-    return {"state": d.get("state", "uncertain"),
-            "retry": d.get("retry", "unsafe"),
-            "witness": d.get("witness", "")}
+    state = d.get("state", "uncertain")
+    retry = d.get("retry", "unsafe")
+    # 已经确认送达时，「能不能重试」是个无意义的问题。写 n/a 而不是沿用 unsafe：
+    # 读结果的人不该被一个不适用的字段牵着走。
+    if state == "delivered":
+        retry = "n/a"
+    return {"state": state, "retry": retry, "witness": d.get("witness", "")}
 
 
 def delivered(res) -> bool:

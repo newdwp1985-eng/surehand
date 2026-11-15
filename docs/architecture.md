@@ -68,6 +68,8 @@ cli do click --ref d:e12
 |---|---|
 | `SKILL.md` | 给 Agent 读的操作手册：判断规则、命令表、铁律、边界 |
 | `README.md` | 给人读的门面：差异点、安装、能力矩阵、实测 |
+| `scripts/mcp_server.py` | MCP 入口（stdio JSON-RPC，12 个工具；只做管道，判断仍在 evidence） |
+| `bin/surehand` | 可执行薄壳，按自身真实位置定位 cli.py，可软链进 PATH |
 | `scripts/cli.py` | 命令行入口 |
 | `scripts/evidence.py` | 判断层（纯函数） |
 | `scripts/transport.py` | 桌面通道客户端（跨平台） |
@@ -78,6 +80,8 @@ cli do click --ref d:e12
 | `engine/windows/wccd.ps1` | Windows 引擎 |
 | `engine/windows/verify.ps1` | Windows 验收脚本（12 步） |
 | `vendor/browser/fastlane.py` | CDP 层（零第三方依赖） |
+| `vendor/browser/cdp.py` | 手写 WebSocket + CDP 传输（自带优先，不依赖外部技能） |
+| `AGENTS.md` | 非技能型 agent 的接入说明（MCP / CLI / 规则） |
 | `references/contract.md` | 输出契约：字段语义、错误码、退出码 |
 | `references/method.md` | 设计取舍：借鉴了什么、拒绝了什么、代价在哪 |
 | `references/recipes.md` | 实战配方与踩过的坑 |

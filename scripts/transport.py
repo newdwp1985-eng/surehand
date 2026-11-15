@@ -344,7 +344,12 @@ def act(action="click", ref=None, app=None, role=None, name=None, ident=None,
                  ("role", norm_role(role)), ("name", name), ("id", ident),
                  ("text", text), ("key", key),
                  ("prefer", prefer), ("verify", verify)):
-        if v not in (None, ""):
+        # text 允许空串：清空输入框是合法动作（填表前先清旧值），
+        # 被当成「没给」会让调用方只能删字符，效率和正确性都掉一档。
+        if k == "text":
+            if v is not None:
+                req[k] = v
+        elif v not in (None, ""):
             req[k] = v
     if contains:
         req["contains"] = True

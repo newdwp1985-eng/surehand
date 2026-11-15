@@ -58,9 +58,20 @@
   "allowed": ["fill", "read"],  // 仅当 restricted
   "proven_in": "subtree:e91",   // 仅当 scope 不是 window：唯一性只在子树内证过
   "addressed_by": "geometry",  // 没名字/没标识，靠位置成立
-  "name_from": "content"   // 名字是从子节点算出来的
+  "name_from": "content",  // 名字是从子节点算出来的
+  "actionable": false,     // 仅网页：能读不能点（结果区、标题）
+  "text": "…"              // 仅网页：节点文本，长文本截断到 300 字
 }
 ```
+
+网页快照在顶层另带两项，用来解释「你没看到的不是没有」：
+
+```json
+{"count": 7, "nodes": [], "ref_valid_at": "https://…", 
+ "frames": ["fr", ""], "frame_count": 2}
+```
+
+`frame_count > 0` 表示页面有内嵌框架，其内部元素不在本次快照里。
 
 ## 2. 三态
 
@@ -112,12 +123,21 @@
   "role": "AXButton", "name": "提交",
   "before": "", "after": "",
   "elapsed_ms": 103.2,
-  "delivery": {"state": "delivered", "retry": "unsafe", "witness": "ax_action_result"}
+  "delivery": {"state": "delivered", "retry": "n/a", "witness": "ax_action_result"}
 }
 ```
 
 `ok` 与 `delivery.state` 不等价：`uncertain` 的动作 `ok` 为假，但它不是「没送到」。
 判断以 `delivery.state` 为准。
+
+`retry` 只在「还没送到」时有意义：
+
+| state | retry | 含义 |
+|---|---|---|
+| `delivered` | `n/a` | 已送达，谈不上重试 |
+| `not_delivered` | `safe` | 明确没送到，可以重放 |
+| `not_delivered` | `unsafe` | 没送到，但重放有副作用（如落点被遮挡） |
+| `uncertain` | `unsafe` | 事件已投出，重放会变成两次投递 |
 
 | 动作 | macOS method | Windows method | state | witness |
 |---|---|---|---|---|
@@ -157,6 +177,11 @@ Windows 的 `fill` 在没有 ValuePattern 的控件上会退到「聚焦 + 全�
 | `BAD_TOKEN` | env | 可以 | 握手令牌不对，端点文件过期 |
 | `UNSUPPORTED_PLATFORM` | env | **不行** | 不是 macOS 也不是 Windows |
 | `BAD_JSON` / `INTERNAL` | bug | 不行 | 客户端发了非法 JSON / 引擎内部异常 |
+| `REF_MALFORMED` | bad_input | 可以 | ref 写法错（漏了 `e`、用了不认识的前缀）；修正参数再试 |
+| `ARG_MISSING` | bad_input | 可以 | 缺必填参数 |
+| `WEB_STEP_FAILED` | web | 可以 | 网页步骤失败；先 `look --web` 看页面现状 |
+| `WEB_NO_TARGET` | web | 可以 | 网页上没这个元素；先看它到底叫什么 |
+| `WEB_LAYER_DOWN` | web | 可以 | 四层定位全失败；改走截图 + 坐标 |
 
 状态未知类错误（`occluded`）一律不授权重放。
 

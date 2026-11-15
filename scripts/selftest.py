@@ -215,7 +215,9 @@ def b_act_receipt():
     r = desk.act("click", ref=target["ref"], prefer="ax", verify="strict")
     d = evidence.delivery(r)
     assert d["state"] == "delivered", "AXPress 没有给送达回执：%s" % d
-    assert d["retry"] == "unsafe"
+    # 送达之后「能不能重试」是个不适用的问题。这里固定住 n/a，
+    # 免得以后有人把 uncertain 的 unsafe 又抄回 delivered 上。
+    assert d["retry"] == "n/a", "送达的动作仍在报 retry=%s" % d["retry"]
     assert r.get("method") in ("axpress", "axpress_fallback")
     return {"ref": target["ref"], "delivery": d, "ms": r.get("elapsed_ms")}
 
@@ -376,6 +378,194 @@ def c_snapshot():
     return {"count": len(nodes), "sample": nodes[0]["ref"]}
 
 
+
+# ---------------------------------------------------------------- A7 错误码
+# ---------------------------------------------------------------- B10-B12
+# ---------------------------------------------------------------- C3-C5
+# ---------------------------------------------------------------- D MCP
+
+def a_error_registry():
+    """新增错误码必须能分类。落进 unknown 就等于告诉调用方「不知道这是什么」，
+    而它其实是我们自己刚加的。"""
+    must = ["REF_MALFORMED", "ARG_MISSING", "WEB_STEP_FAILED", "WEB_NO_TARGET",
+            "WEB_LAYER_DOWN"]
+    missing = [c for c in must if evidence.classify(c)["kind"] == "unknown"]
+    assert not missing, "这些错误码没登记：%s" % missing
+    # 反例：编造的错误码必须明确是 unknown，不能被悄悄归成某类
+    assert evidence.classify("NOT_A_REAL_CODE")["kind"] == "unknown"
+    return {"registry": len(evidence.ERRORS)}
+
+
+def b_read_value():
+    """read 必须把值给出来。只回一句「完成」，调用方等于没读到。"""
+    desk.activate("Calculator")
+    desk.act(action="click", app="Calculator", ident="Seven")
+    snap = desk.snapshot(app="Calculator")
+    assert snap.get("ok"), snap.get("error")
+    disp = [n for n in snap["nodes"] if n.get("role") == "AXStaticText" and n.get("ref")]
+    assert disp, "计算器没有可读的显示屏文本"
+    got = None
+    for n in disp:
+        st = desk.state(n["ref"])
+        if st.get("ok") and st.get("value"):
+            got = st["value"]
+            break
+    assert got is not None, "state 没返回 value 字段"
+    assert "7" in str(got), "读到 %r，期望包含 7" % (got,)
+    return {"value": str(got)}
+
+
+def b_ref_never_reused():
+    """编号一旦发出就不能再被别的元素占用。复用编号意味着「手里的 e12」
+    会静默变成另一个元素——失效会报错，指错不会。"""
+    s1 = desk.snapshot(app="Calculator")
+    r1 = [n["ref"] for n in (s1.get("nodes") or []) if n.get("ref")]
+    s2 = desk.snapshot(app="Calculator")
+    r2 = [n["ref"] for n in (s2.get("nodes") or []) if n.get("ref")]
+    assert r1 and r2, "快照没发出任何令牌"
+    shared = set(r1) & set(r2)
+    assert not shared, "两次快照用了相同编号（被复用）：%s" % sorted(shared)[:3]
+    st = desk.state(r1[0])
+    assert not st.get("ok"), "旧令牌在新快照之后仍然可用：%s" % st
+    assert "REF_STALE" in str(st.get("error")), st
+    return {"first": len(r1), "second": len(r2), "sample": r2[0]}
+
+
+def b_bad_ref():
+    """参数写错报 REF_MALFORMED，不能报成「目标已不在」——后者会让人一直去 look。"""
+    proc = subprocess.run([sys.executable, str(HERE / "cli.py"), "do", "click", "--ref", "abc"],
+                          capture_output=True, text=True)
+    assert proc.returncode == 1, "退出码 %s（期望 1）" % proc.returncode
+    assert "REF_MALFORMED" in proc.stdout, proc.stdout[:200]
+    assert "REF_STALE" not in proc.stdout, "把参数写错报成了目标消失"
+    return {"rc": proc.returncode}
+
+
+PAGE = """
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>靶页</title></head><body>
+<input aria-label="姓名" id="n">
+<input type="checkbox" aria-label="加急" id="v">
+<button aria-label="运行" onclick="document.getElementById('r').textContent='ok-42'">运行</button>
+<pre id="r" aria-label="结果"></pre>
+<iframe srcdoc="&lt;button aria-label=&quot;内层&quot;&gt;内层&lt;/button&gt;"></iframe>
+</body></html>
+"""
+
+
+def _page():
+    """网页用例共用靶页。charset 必须写：没有它，Chrome 在中文系统上按 GBK 猜，
+    中文名会变乱码，看起来像工具读错了字。"""
+    import web
+    path = Path("/tmp/surehand-selftest-page.html")
+    path.write_text(PAGE, encoding="utf-8")
+    web.act_on({"op": "goto", "url": "file://" + str(path)}, recheck=False)
+    return web, path
+
+
+def _ref_int(node):
+    return int(str(node["ref"]).split(":")[1])
+
+
+def c_text_fidelity():
+    import web
+    if not web.health().get("cdp_alive"):
+        return {"skipped": "CDP 未开启（不扣分）", "ok": True}
+    web, _ = _page()
+    nodes = web.normalize(web.snapshot().get("nodes"))
+    names = [n.get("name") for n in nodes]
+    assert "姓名" in names, "读到的名字是 %s（中文没原样传回来）" % names[:8]
+    assert "运行" in names, names[:8]
+    return {"names": names[:6]}
+
+
+def c_readable_and_checked():
+    import web
+    if not web.health().get("cdp_alive"):
+        return {"skipped": "CDP 未开启（不扣分）", "ok": True}
+    web, _ = _page()
+    nodes = web.normalize(web.snapshot().get("nodes"))
+    box = [n for n in nodes if n.get("name") == "加急"]
+    assert box, "没找到复选框"
+    # 勾选状态必须读得出来。读成 'on' 的话，「勾没勾上」永远无法判断。
+    assert box[0].get("value") == "unchecked", "初始状态读成 %r" % box[0].get("value")
+
+    btn = [n for n in nodes if n.get("name") == "运行"]
+    assert btn, "没找到运行按钮"
+    web.act_on({"action": "click", "locator": {"by": "ref", "value": _ref_int(btn[0])}},
+               recheck=False)
+    time.sleep(0.25)
+
+    after = web.normalize(web.snapshot().get("nodes"))
+    # 结果区是 <pre>：不能点，但必须读得到。少了这类节点，
+    # agent 点完按钮就只能靠截图猜结果。
+    ro = [n for n in after if n.get("actionable") is False]
+    assert ro, "结果区这类只读节点没有被收进快照，操作完将无法验证"
+    target = [n for n in after if n.get("name") == "结果"]
+    assert target, "结果区没出现在快照里"
+    rr = web.act_on({"action": "read", "locator": {"by": "ref", "value": _ref_int(target[0])}},
+                    recheck=False)
+    assert rr.get("value") == "ok-42", "read 返回 %r" % (rr.get("value"),)
+
+    box2 = [n for n in after if n.get("name") == "加急"]
+    assert box2, "勾选后找不到复选框"
+    web.act_on({"action": "click", "locator": {"by": "ref", "value": _ref_int(box2[0])}},
+               recheck=False)
+    final = web.normalize(web.snapshot().get("nodes"))
+    box3 = [n for n in final if n.get("name") == "加急"]
+    assert box3 and box3[0].get("value") == "checked", "勾选后读成 %r" % (box3[0].get("value") if box3 else None)
+    return {"value": rr.get("value"), "readable": len(ro)}
+
+
+def c_iframe_reported():
+    import web
+    if not web.health().get("cdp_alive"):
+        return {"skipped": "CDP 未开启（不扣分）", "ok": True}
+    web, _ = _page()
+    snap = web.snapshot()
+    assert snap.get("frame_count", 0) >= 1, "页面有 iframe 却没报出来：%s" % snap.get("frame_count")
+    return {"frames": snap.get("frame_count")}
+
+
+def d_mcp():
+    """MCP 是「任意 agent 都能接」的那条通道，握手和一次真实调用必须能跑通。"""
+    proc = subprocess.Popen([sys.executable, str(HERE / "mcp_server.py")],
+                            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL, text=True, bufsize=1)
+
+    def send(obj):
+        proc.stdin.write(json.dumps(obj, ensure_ascii=False) + "\n")
+        proc.stdin.flush()
+
+    def recv():
+        line = proc.stdout.readline()
+        assert line, "MCP server 没有响应就退出了"
+        return json.loads(line)
+
+    try:
+        send({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+              "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                         "clientInfo": {"name": "selftest", "version": "0"}}})
+        hello = recv()["result"]
+        assert hello["serverInfo"]["name"] == "surehand", hello
+        send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        send({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+        tools = recv()["result"]["tools"]
+        names = [t["name"] for t in tools]
+        assert len(tools) >= 10, names
+        assert "surehand_look" in names and "surehand_do" in names, names
+        send({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+              "params": {"name": "surehand_doctor", "arguments": {}}})
+        res = recv()["result"]
+        assert res.get("isError") is False, res.get("content")
+        return {"tools": len(tools), "protocol": hello["protocolVersion"]}
+    finally:
+        try:
+            proc.stdin.close()
+            proc.terminate()
+        except Exception:
+            pass
+
+
 def main():
     check("A1 三态不塌缩", a_trinary)
     check("A2 令牌与句柄分离", a_tokens)
@@ -383,6 +573,7 @@ def main():
     check("A4 错误分类", a_errors)
     check("A5 通道判定", a_summarize)
     check("A6 定位不取第一个", a_choose)
+    check("A7 错误码全登记", a_error_registry)
 
     check("B1 单实例租约", b_lease, "B")
     check("B2 权限与环境", b_health, "B")
@@ -393,9 +584,17 @@ def main():
     check("B7 自绘界面判定", b_visual_detect, "B")
     check("B8 受限令牌", b_restricted_token, "B")
     check("B9 子树证明范围", b_subtree_scope, "B")
+    check("B10 read 必须返回值", b_read_value, "B")
+    check("B11 令牌编号不复用", b_ref_never_reused, "B")
+    check("B12 参数错与目标失效分开", b_bad_ref, "B")
 
     check("C1 CDP 可用", c_health, "C")
     check("C2 网页快照", c_snapshot, "C")
+    check("C3 网页文本保真", c_text_fidelity, "C")
+    check("C4 只读节点与勾选状态", c_readable_and_checked, "C")
+    check("C5 iframe 如实报告", c_iframe_reported, "C")
+
+    check("D1 MCP 握手与调用", d_mcp, "D")
 
     passed = sum(1 for r in RESULTS if r["ok"])
     skipped = sum(1 for r in RESULTS if (r["detail"] or {}).get("skipped"))

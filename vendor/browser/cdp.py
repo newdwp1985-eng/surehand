@@ -219,7 +219,7 @@ class CDPClient:
         except urllib.error.URLError as exc:
             raise CDPError(
                 "无法连接 CDP（%s）。请确认浏览器已以调试模式启动："
-                "surehand launch 。原始错误：%s" % (url, exc)
+                "surehand launch 起一个带调试端口的实例。原始错误：%s" % (url, exc)
             )
         except json.JSONDecodeError as exc:
             raise CDPError("CDP 返回了非 JSON 内容：%s" % exc)

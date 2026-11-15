@@ -2,6 +2,57 @@
 
 格式照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号照语义化版本。
 
+## [1.1.0] — 2026-11-15
+
+这一版来自一轮对抗性测试：故意做错事、故意读不该读的东西、故意把令牌放到过期之后。
+下面每条都是先看到现象、再定位、再修，没有一条是「顺手改进」。
+
+### 安全
+
+- **令牌编号不再复用**（`mccd.swift` / `wccd.ps1`）。此前每次快照把计数器清零，
+  上一次的 `e2` 会被下一次的 `e2` 顶掉。用户手里的旧令牌不是「失效」，而是**静默指向
+  另一个元素**——失效会报错，指错不会。现在编号在本进程内单调递增，旧令牌一律
+  `REF_STALE`。实测：两次快照编号区间不重叠，旧 `d:e1` 立即被拒。
+
+### 修复
+
+- **`read` 不返回值**。桌面 `read` 走 `state` 后只打印「完成」，网页 `read` 把结果留在
+  `attempts[].detail.result` 里没提上来。读到却不告诉调用方，等于没读。现在两条通道
+  都直接给 `value`。
+- **网页快照看不见结果区**。选择器只有可交互元素，`<pre>`、`[aria-label]`、`[aria-live]`
+  这类承载结果的节点完全不在快照里，agent 点完按钮只能靠截图猜。现在纳入并标
+  `actionable: false`（显示为 `[只读]`）。
+- **复选框状态读不出**。`value` 取的是 `el.value`，复选框恒为 `on`，「勾没勾上」永远
+  无法判断。现在返回 `checked` / `unchecked`。
+- **`setvalue("")` 被当成「没给文本」**。清空输入框是填表前的高频动作，此前只能逐字删除。
+  根因在 `transport.act` 用 `if v not in (None, "")` 过滤参数。
+- **`launch` 起不动浏览器**。`open -na ... --args` 在本机返回 0 却不起进程，轮询 25 秒后
+  报「端口被安全软件拦了」，误导排查方向。改成 `Popen` 直接启动（`start_new_session`），
+  并把浏览器 stderr 收进日志，失败时按 `sandbox initialization failed` / 端口占用 /
+  profile 锁残留分别给结论。
+- **`doctor` 不检查仓库完整性**。`vendor/browser/cdp.py` 缺失时网页通道要到真正调用才炸，
+  报错还指向别的技能。现在体检直接报。
+- **iframe 完全不可见**。页面有 iframe 时快照只覆盖主文档，看起来像「页面是空的」。
+  现在如实返回 `frame_count` 并在 `look` 里提示。
+
+### 变更
+
+- **错误码精度**：`ref` 写法错报 `REF_MALFORMED`（`bad_input`），不再复用 `REF_STALE`。
+  后者提示「目标已不在，重新 look」，照做一万次也发现不了是自己少写了个 `e`。
+- **新增错误码**：`ARG_MISSING`、`WEB_STEP_FAILED`、`WEB_NO_TARGET`、`WEB_LAYER_DOWN`。
+  此前网页步骤失败落到 `unknown`，提示是「未登记的错误」。
+- **`delivered` 时 `retry` 改为 `n/a`**。已经送达，重试与否是个不适用的问题；
+  沿用 `unsafe` 会让读结果的人被一个无意义的字段牵着走。
+
+### 新增
+
+- **MCP server**（`scripts/mcp_server.py`）：零依赖 stdio JSON-RPC，12 个工具。
+  Claude Code / Cursor / Codex / WorkBuddy 以及任何支持 stdio MCP 的客户端都能接，
+  不再只限认识 `SKILL.md` 的宿主。
+- **`AGENTS.md`**：给非技能型 agent 的接入说明、平台差异、以及「不要做的事」。
+- **自测 17 → 25 项**：新增错误码登记、`read` 返回值、令牌不复用、参数错与目标失效分离、
+  网页文本保真、只读节点与勾选状态、iframe 报告、MCP 握手与调用。当前 25/25，0 跳过。
+
 ## [1.0.2] — 2026-11-15
 
 一个只在 macOS 上出现的 shell 边界问题。引擎与判断层都没动。

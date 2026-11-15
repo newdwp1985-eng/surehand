@@ -437,7 +437,9 @@ $script:RegistryPid = 0
 
 function Reset-Registry($rootEl, [int]$procId) {
     $script:Registry = @{}
-    $script:RefCounter = 0
+    # 不清零 $script:RefCounter：编号在进程生命周期内单调递增，永不复用。
+    # 清零会让新快照的 e2 顶掉旧快照的 e2，旧 ref 不再报失效，而是静默指向
+    # 另一个元素 —— 这是最难查的一类误点。
     $script:RegistryRoot = $rootEl
     $script:RegistryPid = $procId
     $epoch = [int64](([DateTime]::UtcNow - [datetime]'1970-01-01').TotalMilliseconds)

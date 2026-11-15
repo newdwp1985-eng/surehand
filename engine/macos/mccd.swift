@@ -9,7 +9,7 @@ import CoreGraphics
 import ImageIO
 import CoreText
 
-let VERSION = "1.0.0"
+let VERSION = "1.1.0"
 let SOCK_PATH = "/tmp/mccd-\(getuid()).sock"
 let LOCK_PATH = "/tmp/mccd-\(getuid()).lock"
 
@@ -171,7 +171,9 @@ final class Registry {
     func newSnapshot(_ window: AXUIElement, pid: pid_t) -> String {
         lock.lock(); defer { lock.unlock() }
         map.removeAll()
-        counter = 0
+        // counter 不清零：ref 编号在本进程生命周期内单调递增，永不复用。
+        // 清零会让下一次快照的 e2 顶掉上一次的 e2——用户手里的旧 ref 不是「失效」，
+        // 而是静默指到了另一个元素上。失效会报错，指错不会，这就是误点的最短路径。
         win = window
         self.pid = pid
         sid = "s\(Int(Date().timeIntervalSince1970 * 1000))"

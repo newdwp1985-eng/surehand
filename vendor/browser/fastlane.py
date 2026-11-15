@@ -128,9 +128,37 @@ HELPERS = r"""
     const r = el.getBoundingClientRect();
     return r.width >= 1 && r.height >= 1;
   };
-  const nodes = () => Array.from(document.querySelectorAll(
-    'a,button,input,textarea,select,[role],[tabindex],[contenteditable="true"]'
-  )).filter(visible);
+  // 可操作元素：能点、能填、能聚焦的。
+  const INTERACTIVE = 'a,button,input,textarea,select,[role],[tabindex],[contenteditable="true"]';
+  // 可读元素：不能操作但承载结果文本。缺了这一类，agent 点完按钮就看不见结果，
+  // 只能截图猜——这是「操作成功但无法验证」的根源。
+  const READABLE = '[aria-label],[aria-live],pre,output,td,th,h1,h2,h3,h4,h5,h6';
+  const MAX_NODES = 600;
+  const textOf = el => String(el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+  const nodes = () => {
+    const out = [], seen = new Set();
+    for (const el of document.querySelectorAll(INTERACTIVE)) {
+      if (!visible(el) || seen.has(el)) continue;
+      seen.add(el); out.push(el);
+    }
+    for (const el of document.querySelectorAll(READABLE)) {
+      if (seen.has(el) || !visible(el)) continue;
+      const t = textOf(el);
+      if (!t) continue;
+      // 祖先已经在列表里且文本相同，就不再重复收一遍子节点。
+      if (out.some(p => p.contains(el) && textOf(p) === t)) continue;
+      seen.add(el); out.push(el);
+      if (out.length >= MAX_NODES) break;
+    }
+    return out;
+  };
+  const nodeValue = el => {
+    const t = String(el.type || '').toLowerCase();
+    if (t === 'checkbox' || t === 'radio') return el.checked ? 'checked' : 'unchecked';
+    if (el.value === undefined || el.value === null) return null;
+    return String(el.value);
+  };
+  const interactiveOf = el => el.matches(INTERACTIVE);
   const rectOf = el => {
     const r = el.getBoundingClientRect();
     return {
@@ -170,7 +198,9 @@ __HELPERS__
       tag: el.tagName.toLowerCase(),
       role: roleOf(el),
       name: nameOf(el),
-      value: (el.value === undefined ? null : el.value),
+      value: nodeValue(el),
+      text: textOf(el).slice(0, 300),
+      actionable: interactiveOf(el),
       href: el.getAttribute('href') || null
     }, rectOf(el));
   });
@@ -452,7 +482,15 @@ class Fastlane:
     def snapshot(self):
         nodes = self.js(SNAPSHOT_EXPR) or []
         self._snapshot_url = self.js("location.href")
-        return {"count": len(nodes), "nodes": nodes, "ref_valid_at": self._snapshot_url}
+        # iframe 里的元素不在主文档树里，快照看不到。这里如实报数量，
+        # 让调用方知道「你没看到的不是没有」，而不是把缺元素当成页面为空。
+        frames = self.js(
+            "(() => Array.from(document.querySelectorAll('iframe,frame'))"
+            ".filter(f => f.getBoundingClientRect().width > 1)"
+            ".map(f => f.getAttribute('aria-label') || f.getAttribute('title') || f.id || ''))()"
+        ) or []
+        return {"count": len(nodes), "nodes": nodes, "ref_valid_at": self._snapshot_url,
+                "frames": frames, "frame_count": len(frames)}
 
     def verify(self, expression):
         if not expression:
