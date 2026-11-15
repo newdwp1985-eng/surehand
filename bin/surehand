@@ -1,0 +1,30 @@
+#!/bin/sh
+# surehand —— 技能的统一入口。
+#
+# 存在的理由：技能可以被装到不同位置（WorkBuddy 在 ~/.workbuddy/skills，DSH 在
+# ~/.dsh/skills，别人可能装在任何地方）。文档里如果写死某条绝对路径，换个宿主就失效。
+# 这个壳只做一件事：找到自己真实所在位置，把参数原样交给 scripts/cli.py。
+#
+# 可以安全地被软链到 PATH 上的任意位置（~/.local/bin 之类）。
+set -e
+
+SELF="$0"
+# 逐级解开软链，直到拿到真实文件路径。
+while [ -L "$SELF" ]; do
+    TARGET="$(readlink "$SELF")"
+    case "$TARGET" in
+        /*) SELF="$TARGET" ;;
+        *)  SELF="$(dirname "$SELF")/$TARGET" ;;
+    esac
+done
+
+ROOT="$(cd "$(dirname "$SELF")/.." && pwd)"
+CLI="$ROOT/scripts/cli.py"
+
+if [ ! -f "$CLI" ]; then
+    echo "surehand: 找不到 $CLI" >&2
+    echo "surehand: 这个壳必须和 scripts/cli.py 在同一个技能目录里。" >&2
+    exit 127
+fi
+
+exec python3 "$CLI" "$@"

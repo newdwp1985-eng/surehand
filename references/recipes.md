@@ -7,17 +7,17 @@
 `look --app 微信` 会判成 `visual`。全程坐标 + 剪贴板。
 
 ```bash
-CU="python3 ~/.workbuddy/skills/computer-use/scripts/cu.py"
-$CU do activate --app 微信
-$CU do key --combo "cmd+1"                 # 回聊天视图（cmd+2 通讯录 / cmd+3 收藏 / cmd+4 朋友圈）
-$CU tap --app 微信 --x 120 --y 20           # 点搜索框
-$CU do paste --text "联系人名"
-$CU do key --combo "return"                # 回车进首个结果
-$CU shot --app 微信                         # 复核：标题栏是不是这个人
-$CU tap --app 微信 --x 579 --y 575          # 点输入框（不点这里写不进字）
-$CU do paste --text "正文"
-$CU shot --app 微信                         # 复核：文字完整、无残留
-$CU do key --combo "return"
+SH="surehand"        # 技能自带的入口；没接进 PATH 时用 python3 <技能目录>/scripts/cli.py
+$SH do activate --app 微信
+$SH do key --combo "cmd+1"                 # 回聊天视图（cmd+2 通讯录 / cmd+3 收藏 / cmd+4 朋友圈）
+$SH tap --app 微信 --x 120 --y 20           # 点搜索框
+$SH do paste --text "联系人名"
+$SH do key --combo "return"                # 回车进首个结果
+$SH shot --app 微信                         # 复核：标题栏是不是这个人
+$SH tap --app 微信 --x 579 --y 575          # 点输入框（不点这里写不进字）
+$SH do paste --text "正文"
+$SH shot --app 微信                         # 复核：文字完整、无残留
+$SH do key --combo "return"
 ```
 
 要点：
@@ -27,12 +27,12 @@ $CU do key --combo "return"
 ## 2. 微信：朋友圈点赞
 
 ```bash
-$CU do activate --app 微信
-$CU do key --combo "cmd+4"
-$CU scroll --app 微信 --x 600 --y 400 --dy -6 --times 3
-$CU shot --app 微信
+$SH do activate --app 微信
+$SH do key --combo "cmd+4"
+$SH scroll --app 微信 --x 600 --y 400 --dy -6 --times 3
+$SH shot --app 微信
 # 找到目标动态 → 点右下角「••」→ 弹 [♡ 赞][评论] → 点「赞」
-$CU shot --app 微信      # 复核：动态下方出现灰底「♡ 自己的昵称」
+$SH shot --app 微信      # 复核：动态下方出现灰底「♡ 自己的昵称」
 ```
 
 悬停（`hover`）**不会**唤出赞按钮，必须点「••」。
@@ -49,12 +49,12 @@ $CU shot --app 微信      # 复核：动态下方出现灰底「♡ 自己的�
 ## 4. 浏览器：登录表单（结构通道）
 
 ```bash
-$CU do goto --url https://example.com/login
-$CU look --web
-$CU do fill --web --text 账号 --text-value "dingweiping"
-$CU do fill --web --text 密码 --text-value "……"
-$CU do click --web --text 登录
-$CU do eval --text "document.title"        # 断言登录后的页面
+$SH do goto --url https://example.com/login
+$SH look --web
+$SH do fill --web --text 账号 --text-value "dingweiping"
+$SH do fill --web --text 密码 --text-value "……"
+$SH do click --web --text 登录
+$SH do eval --text "document.title"        # 断言登录后的页面
 ```
 
 要点：
@@ -67,9 +67,9 @@ $CU do eval --text "document.title"        # 断言登录后的页面
 计算器这类应用按钮**没有可见名字**（标签是画上去的），但有稳定标识：
 
 ```bash
-$CU look --app Calculator
+$SH look --app Calculator
 #   e4 | Button | #Delete @520,629 48x48
-$CU do click --app Calculator --id AllClear
+$SH do click --app Calculator --id AllClear
 ```
 
 `--id` 比 `--name` 稳：文案会随语言和改版变，identifier 不变。
@@ -82,10 +82,10 @@ $CU do click --app Calculator --id AllClear
 访达的 AX 属性是逐次跨进程取的，单节点约 36 ms，整窗 7~9 秒。
 
 ```bash
-$CU look --app 访达 --depth 3              # 70 ms，只摸结构，不发证
+$SH look --app 访达 --depth 3              # 70 ms，只摸结构，不发证
 #   · | Window | '下载' | #FinderWindow
 #       · | Outline | #_NS:8
-$CU look --app 访达 --from e2 --depth 7     # 从侧边栏钻进去，范围收窄
+$SH look --app 访达 --from e2 --depth 7     # 从侧边栏钻进去，范围收窄
 ```
 
 `--from` 接受 `handle`（显示为 `·`）—— 句柄能导航不能动手，这正是它存在的意义。
@@ -113,12 +113,12 @@ $CU look --app 访达 --from e2 --depth 7     # 从侧边栏钻进去，范围�
 
 界面找不到东西时，按这个顺序查，别跳：
 
-1. `$CU look --app X` —— 判成 `visual` 就别再试语义定位，直接走截图。
-2. `$CU look --app X` 里的 `[不唯一 ×N]` —— 同名元素，补 `--role`/`--id`/`--contains`。
-3. `$CU attrs --ref eN` —— 把元素全部属性导出来，看标签到底藏在哪个字段
+1. `$SH look --app X` —— 判成 `visual` 就别再试语义定位，直接走截图。
+2. `$SH look --app X` 里的 `[不唯一 ×N]` —— 同名元素，补 `--role`/`--id`/`--contains`。
+3. `$SH attrs --ref eN` —— 把元素全部属性导出来，看标签到底藏在哪个字段
    （常见：`AXHelp`、`AXTitleUIElement`、`AXIdentifier`）。
-4. `$CU find --app X --text 关键词 --contains` —— 模糊找一下。
-5. `$CU doctor` —— 权限、daemon 实例数、CDP 端口。
+4. `$SH find --app X --text 关键词 --contains` —— 模糊找一下。
+5. `$SH doctor` —— 权限、daemon 实例数、CDP 端口。
 
 ## 9. 已知的环境坑
 

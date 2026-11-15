@@ -17,8 +17,8 @@ v2 结合 browser-automation 规格后新增：
   - 批量 op：goto / wait / sleep / eval / press / scroll / hover / select /
     snapshot / capture / probe 与四层动作在同一条连接上混排
 
-传输层以只读方式复用 browser-automation-cdp 的 cdp.py（Python 标准库
-WebSocket 客户端），不修改任何现有技能文件。
+传输层用仓库自带的 vendor/browser/cdp.py（Python 标准库 WebSocket 客户端），
+不再依赖外部技能目录；找不到自带副本时才回退到已安装的 browser-automation-cdp。
 
 标准输出恒为一行 JSON；诊断信息走标准错误。
 退出码：0 成功；1 动作失败或环境不可达。
@@ -54,14 +54,17 @@ def force_direct_local():
 
 force_direct_local()
 
-CDP_LIB = (
-    Path.home()
-    / ".workbuddy"
-    / "skills"
-    / "browser-automation-cdp"
-    / "scripts"
-    / "cdp.py"
-)
+_HERE = Path(__file__).resolve().parent
+# 自包含优先：先找仓库自带的副本，再退回到别处已安装的同名技能。
+# 之前这里写死了 ~/.workbuddy/skills/browser-automation-cdp/...，换机器或换宿主
+# （比如装到 ~/.dsh/skills）就直接断掉，而且报错信息还指向一个本仓库没有的脚本。
+CDP_LIB_CANDIDATES = [
+    _HERE / "cdp.py",
+    Path.home() / ".workbuddy" / "skills" / "browser-automation-cdp" / "scripts" / "cdp.py",
+    Path.home() / ".dsh" / "skills" / "browser-automation-cdp" / "scripts" / "cdp.py",
+    Path.home() / ".agents" / "skills" / "browser-automation-cdp" / "scripts" / "cdp.py",
+]
+CDP_LIB = next((p for p in CDP_LIB_CANDIDATES if p.is_file()), CDP_LIB_CANDIDATES[0])
 
 LAYERS = ["L1", "L2", "L3", "L4"]
 TIME_BUDGET = {"L1": 3.0, "L2": 5.0, "L3": 5.0, "L4": 15.0}

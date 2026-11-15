@@ -2,6 +2,31 @@
 
 格式照 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号照语义化版本。
 
+## [1.0.1] — 2026-11-15
+
+修掉「换了宿主就失效」的一类问题。引擎二进制没有变化，不需要重建。触发它的场景是
+把技能装进 DeepSeek Harness：宿主不同，技能目录就不同，而文档里写死了绝对路径。
+
+### 新增
+
+- `bin/surehand`：一层薄壳，按自身真实位置定位 `scripts/cli.py`，可以安全地被软链到
+  PATH 上任意位置。文档里的命令统一改成 `surehand ...`，不再依赖技能装在哪儿。
+
+### 修复
+
+- `SKILL.md` 两处写死的 `python3 ~/.workbuddy/skills/surehand/scripts/cli.py` 换成
+  `surehand`，并附等价字面量写法。
+- `references/recipes.md` 里的调用变量仍指向已废弃的 `computer-use` 路径（实测会直接报
+  `No such file or directory`），30 处引用一并改为 `SH=surehand`。
+- `install.sh`：目标目录改为可传参（`./install.sh ~/.dsh/skills/surehand`），默认用复制
+  而不是符号链接——宿主自己的文件服务可能拒绝跨出允许根目录的软链；顺带把 `surehand`
+  接进 `~/.local/bin`，并新增 `--link` / `--copy` / `--force`。
+- **浏览器层原本不是自包含的**：`vendor/browser/fastlane.py` 写死了
+  `~/.workbuddy/skills/browser-automation-cdp/scripts/cdp.py`。一旦换了宿主或那门技能被移动，
+  网页通道直接报缺文件，而且报错里让人跑本仓库根本没有的 `scripts/start_chrome.py`。
+  现在把 `cdp.py` 收进 `vendor/browser/`，改成「自带优先、外部兜底」；三处提示文案改成
+  `surehand launch`。
+
 ## [1.0.0] — 2026-11-15
 
 首个公开版本。此前它以 `computer-use` 的名字在内部用了一周，跑过三个验收任务：
