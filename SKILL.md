@@ -1,6 +1,6 @@
 ---
 name: surehand
-display_name: Surehand 稳手
+display_name: Surehand 稳手 · 桌面自动化
 display_name_en: Surehand
 slug: surehand
 description: "操作本机电脑与浏览器的统一入口：先观察、再判断通道、再动手，每一步都带回执。原生控件走可访问性树（macOS AX / Windows UIA），读到的是结构与唯一令牌；自绘界面（微信、抖音、Qt/CEF）结构为空时自动判定为视觉通道，用窗口相对坐标 + 剪贴板；网页走 CDP。凡是需要点按钮、填表、读界面、发消息、点赞、转发、翻列表、跑多步流程的任务都先用本技能。触发词：操作电脑、帮我点一下、在微信里发消息、朋友圈点赞、转发抖音、填表、读界面、桌面自动化、浏览器操作、computer use。"
