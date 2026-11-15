@@ -1,0 +1,21 @@
+# 忽略运行时产物，不忽略源码
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 运行时状态：ref 身份表随每次快照重建，不该进版本库
+.state.json
+
+# 编译产物：macOS 引擎首次 up 时自动编译
+engine/macos/bin/
+
+# 验收与自测的报告
+verify-report.json
+surehand-selftest.json
+
+# 日志与临时件
+*.log
+.DS_Store
+Thumbs.db
+computer-use-selftest.json
